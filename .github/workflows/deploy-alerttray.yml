@@ -1,4 +1,4 @@
-name: Build and Deploy AlertTray
+name: Build and Deploy Nextjs AlertTray
 
 on:
   push:

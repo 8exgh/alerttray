@@ -30,7 +30,6 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy additional required files for AlertTray
 COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/app ./app
-COPY --from=builder /app/components ./components
 COPY --from=builder /app/types ./types
 
 # Create data directory for SQLite databases
