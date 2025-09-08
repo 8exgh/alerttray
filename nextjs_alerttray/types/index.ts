@@ -90,6 +90,21 @@ export interface ApiKeyRevokedEvent {
   timestamp: Date;
 }
 
+export interface DeviceRegisteredEvent {
+  deviceId: string;
+  userId: string;
+  token: string;
+  deviceName?: string;
+  platform: string;
+  timestamp: Date;
+}
+
+export interface DeviceUnregisteredEvent {
+  deviceId: string;
+  userId: string;
+  timestamp: Date;
+}
+
 export interface User {
   id: string;
   email: string;

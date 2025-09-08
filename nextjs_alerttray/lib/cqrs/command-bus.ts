@@ -38,6 +38,10 @@ export class CommandBus {
         return this.handleCreateApiKey(command);
       case 'RevokeApiKey':
         return this.handleRevokeApiKey(command);
+      case 'RegisterDevice':
+        return this.handleRegisterDevice(command);
+      case 'UnregisterDevice':
+        return this.handleUnregisterDevice(command);
       default:
         throw new Error(`Unknown command type: ${command.type}`);
     }
@@ -226,6 +230,53 @@ export class CommandBus {
       eventVersion: 1,
       eventData: {
         apiKeyId,
+        userId: command.userId,
+        timestamp: now
+      },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+  }
+  
+  private handleRegisterDevice(command: Command): Event[] {
+    const { token, deviceName, platform = 'ios' } = command.payload;
+    const deviceId = command.aggregateId || uuidv4();
+    const now = new Date();
+    
+    const events: Event[] = [{
+      aggregateId: deviceId,
+      aggregateType: 'Device',
+      eventType: 'DeviceRegisteredEvent',
+      eventVersion: 1,
+      eventData: {
+        deviceId,
+        userId: command.userId,
+        token,
+        deviceName,
+        platform,
+        timestamp: now
+      },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+    
+    // After registering a device, we need to check for pending notifications
+    // This will be handled by the projection engine when it processes this event
+    
+    return events;
+  }
+  
+  private handleUnregisterDevice(command: Command): Event[] {
+    const { deviceId } = command.payload;
+    const now = new Date();
+    
+    return [{
+      aggregateId: deviceId,
+      aggregateType: 'Device',
+      eventType: 'DeviceUnregisteredEvent',
+      eventVersion: 1,
+      eventData: {
+        deviceId,
         userId: command.userId,
         timestamp: now
       },

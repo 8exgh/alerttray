@@ -1,6 +1,7 @@
 import { Event } from '@/types';
 import { EventStore } from './event-store';
 import { getReadModelDatabase, getAllUserIds } from '@/lib/infrastructure/database/connection';
+import { v4 as uuidv4 } from 'uuid';
 
 export class ProjectionEngine {
   private checkInterval = 1000; // 1 second
@@ -105,6 +106,12 @@ export class ProjectionEngine {
         break;
       case 'NotificationPurposeDeactivatedEvent':
         this.projectPurposeDeactivated(db, event);
+        break;
+      case 'DeviceRegisteredEvent':
+        this.projectDeviceRegistered(db, event, userId);
+        break;
+      case 'DeviceUnregisteredEvent':
+        this.projectDeviceUnregistered(db, event);
         break;
     }
   }
@@ -260,5 +267,56 @@ export class ProjectionEngine {
     `);
     
     update.run(new Date().toISOString(), purposeId);
+  }
+  
+  private projectDeviceRegistered(db: any, event: Event, userId: string): void {
+    const { deviceId, token, deviceName, platform } = event.eventData;
+    
+    // Device is already registered in system database by the API endpoint
+    // Here we need to check for pending notifications without push tasks
+    
+    // Find all notifications for this user that don't have push tasks for this device
+    const pendingNotifications = db.prepare(`
+      SELECT n.* FROM notifications n
+      WHERE n.user_id = ? 
+      AND n.status = 'pending'
+      AND NOT EXISTS (
+        SELECT 1 FROM push_tasks pt 
+        WHERE pt.notification_id = n.id 
+        AND pt.device_token = ?
+      )
+    `).all(userId, token) as any[];
+    
+    // Create push tasks for each pending notification
+    const insertPushTask = db.prepare(`
+      INSERT INTO push_tasks (
+        id, notification_id, user_id, device_token, 
+        title, message, data, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `);
+    
+    const now = new Date().toISOString();
+    for (const notification of pendingNotifications) {
+      const taskId = uuidv4();
+      insertPushTask.run(
+        taskId,
+        notification.id,
+        userId,
+        token,
+        notification.title,
+        notification.message,
+        JSON.stringify({ notificationId: notification.id }),
+        now,
+        now
+      );
+    }
+  }
+  
+  private projectDeviceUnregistered(db: any, event: Event): void {
+    const { deviceId } = event.eventData;
+    
+    // We don't need to do anything here for the read model
+    // The system database handles the actual device removal
+    // Push tasks that were already created will remain and can fail naturally
   }
 }

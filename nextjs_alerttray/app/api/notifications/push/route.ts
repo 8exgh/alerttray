@@ -28,20 +28,6 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Get device tokens for user
-    const db = getSystemDatabase();
-    const devices = db.prepare(`
-      SELECT token FROM device_tokens WHERE user_id = ?
-    `).all(keyData.userId) as any[];
-    db.close();
-    
-    if (devices.length === 0) {
-      return NextResponse.json(
-        { error: 'No devices registered' },
-        { status: 400 }
-      );
-    }
-    
     const body = await request.json();
     
     // Validate required fields
@@ -61,10 +47,17 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Get device tokens for user (optional - notification will be created regardless)
+    const db = getSystemDatabase();
+    const devices = db.prepare(`
+      SELECT token FROM device_tokens WHERE user_id = ?
+    `).all(keyData.userId) as any[];
+    db.close();
+    
     const commandBus = new CommandBus();
     const notificationId = uuidv4();
     
-    // Create notification and schedule push tasks
+    // Create notification and schedule push tasks (if devices exist)
     await commandBus.dispatch({
       userId: keyData.userId,
       aggregateId: notificationId,
@@ -75,7 +68,7 @@ export async function POST(request: NextRequest) {
         message: body.message,
         severity: body.severity,
         metadata: body.metadata,
-        deviceTokens: devices.map(d => d.token)
+        deviceTokens: devices.map(d => d.token) // Will be empty array if no devices
       }
     });
     

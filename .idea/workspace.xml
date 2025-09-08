@@ -4,7 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="" />
+    <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/app/api/notifications/push/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/app/api/notifications/push/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/data/read_model/read.db" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/data/read_model/read.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/data/system/system.db" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/data/system/system.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/data/users/d6794732-1ce6-4db9-8019-43574f4a58a7/write.db" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/data/users/d6794732-1ce6-4db9-8019-43574f4a58a7/write.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/lib/cqrs/command-bus.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/lib/cqrs/command-bus.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/lib/cqrs/projection-engine.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/lib/cqrs/projection-engine.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/types/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/types/index.ts" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -13,9 +22,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo">{
-  &quot;associatedIndex&quot;: 1
-}</component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 1
+}]]></component>
   <component name="ProjectId" id="32OUuuLPROjARRSf4k9F1l5g06g" />
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="1" id="Add" />
@@ -24,21 +33,21 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/sean/8Examples/alerttray&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/sean/8Examples/alerttray",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$" />
