@@ -4,6 +4,7 @@ import { getSystemDatabase } from '@/lib/infrastructure/database/connection';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeSystem } from '@/lib/startup';
+import type { DeviceTokenRow } from '@/types/db-types';
 
 export async function POST(request: NextRequest) {
   await initializeSystem();
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       // Check if this token already exists
       const existing = db.prepare(`
         SELECT id FROM device_tokens WHERE token = ?
-      `).get(token) as any;
+      `).get(token) as Pick<DeviceTokenRow, 'id'> | undefined;
       
       let deviceId: string;
       

@@ -4,6 +4,7 @@ import { getSystemDatabase } from '@/lib/infrastructure/database/connection';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeSystem } from '@/lib/startup';
+import type { DeviceTokenRow } from '@/types/db-types';
 
 export async function POST(request: NextRequest) {
   await initializeSystem();
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     const db = getSystemDatabase();
     const devices = db.prepare(`
       SELECT token FROM device_tokens WHERE user_id = ?
-    `).all(keyData.userId) as any[];
+    `).all(keyData.userId) as Pick<DeviceTokenRow, 'token'>[];
     db.close();
     
     const commandBus = new CommandBus();

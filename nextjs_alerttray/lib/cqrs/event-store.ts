@@ -1,7 +1,8 @@
 import { Event } from '@/types';
 import { getUserWriteDatabase } from '@/lib/infrastructure/database/connection';
+import type { EventRow, MaxSequenceResult } from '@/types/db-types';
 
-export function assert(condition: any, message: string): asserts condition {
+export function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(`Assertion failed: ${message}`);
   }
@@ -27,7 +28,7 @@ export class EventStore {
     );
     
     db.transaction(() => {
-      const result = getLastSequence.get() as { max_seq: number | null };
+      const result = getLastSequence.get() as MaxSequenceResult;
       let nextSequence = (result.max_seq || 0) + 1;
       
       for (const event of events) {
@@ -55,7 +56,7 @@ export class EventStore {
     const db = getUserWriteDatabase(userId);
     
     let query = 'SELECT * FROM events WHERE sequence_number > ?';
-    const params: any[] = [fromSequence];
+    const params: (string | number)[] = [fromSequence];
     
     if (aggregateId) {
       query += ' AND aggregate_id = ?';
@@ -65,7 +66,7 @@ export class EventStore {
     query += ' ORDER BY sequence_number ASC';
     
     const stmt = db.prepare(query);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as EventRow[];
     
     db.close();
     

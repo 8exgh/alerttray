@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
     
     const user = await AuthService.createUser(email, password);
-    const { session, token } = await AuthService.createSession(user.id);
+    const { token } = await AuthService.createSession(user.id);
     
     const response = NextResponse.json({
       success: true,
@@ -43,10 +43,10 @@ export async function POST(request: NextRequest) {
     });
     
     return response;
-  } catch (error: any) {
+  } catch (error) {
     console.error('Registration error:', error);
     
-    if (error.message === 'User already exists') {
+    if (error instanceof Error && error.message === 'User already exists') {
       return NextResponse.json(
         { error: 'Email already registered' },
         { status: 409 }

@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const { session, token } = await AuthService.createSession(user.id);
+    const { token } = await AuthService.createSession(user.id);
     
     const response = NextResponse.json({
       success: true,

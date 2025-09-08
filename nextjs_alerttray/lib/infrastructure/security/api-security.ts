@@ -2,6 +2,7 @@ import { createHmac, createHash, randomBytes } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSystemDatabase } from '../database/connection';
 import { v4 as uuidv4 } from 'uuid';
+import type { ApiKeyRow } from '@/types/db-types';
 
 export class ApiSecurity {
   static generateApiKey(): { key: string; hash: string } {
@@ -50,7 +51,7 @@ export class ApiSecurity {
       const row = db.prepare(`
         SELECT id, user_id FROM api_keys 
         WHERE key_hash = ? AND revoked_at IS NULL
-      `).get(keyHash) as any;
+      `).get(keyHash) as Pick<ApiKeyRow, 'id' | 'user_id'> | undefined;
       
       if (!row) {
         return null;
@@ -77,7 +78,7 @@ export class ApiSecurity {
     }
   }
   
-  static async listApiKeys(userId: string): Promise<any[]> {
+  static async listApiKeys(userId: string): Promise<Partial<ApiKeyRow>[]> {
     const db = getSystemDatabase();
     
     try {
@@ -86,7 +87,7 @@ export class ApiSecurity {
         FROM api_keys 
         WHERE user_id = ?
         ORDER BY created_at DESC
-      `).all(userId) as any[];
+      `).all(userId) as ApiKeyRow[];
       
       return rows.map(row => ({
         id: row.id,
@@ -142,6 +143,6 @@ export async function withInternalAuth(
   }
 }
 
-export function createInternalResponse(data: any): NextResponse {
+export function createInternalResponse(data: unknown): NextResponse {
   return NextResponse.json(data);
 }

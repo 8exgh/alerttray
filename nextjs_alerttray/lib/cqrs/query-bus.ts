@@ -1,5 +1,6 @@
 import { getReadModelDatabase } from '@/lib/infrastructure/database/connection';
 import { Notification, NotificationPurpose, PushTask } from '@/types';
+import type { NotificationRow, NotificationPurposeRow, PushTaskRow, CountResult } from '@/types/db-types';
 
 export class QueryBus {
   async getNotifications(userId: string, limit: number = 50): Promise<Notification[]> {
@@ -10,7 +11,7 @@ export class QueryBus {
       WHERE user_id = ? 
       ORDER BY created_at DESC 
       LIMIT ?
-    `).all(userId, limit) as any[];
+    `).all(userId, limit) as NotificationRow[];
     
     db.close();
     
@@ -20,9 +21,9 @@ export class QueryBus {
       purposeId: row.purpose_id,
       title: row.title,
       message: row.message,
-      severity: row.severity,
+      severity: row.severity as 'low' | 'medium' | 'high' | 'critical',
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      status: row.status,
+      status: row.status as 'pending' | 'delivered' | 'failed' | 'read',
       deliveredAt: row.delivered_at ? new Date(row.delivered_at) : undefined,
       readAt: row.read_at ? new Date(row.read_at) : undefined,
       createdAt: new Date(row.created_at),
@@ -37,7 +38,7 @@ export class QueryBus {
       SELECT * FROM notification_purposes 
       WHERE user_id = ? 
       ORDER BY created_at DESC
-    `).all(userId) as any[];
+    `).all(userId) as NotificationPurposeRow[];
     
     db.close();
     
@@ -45,9 +46,9 @@ export class QueryBus {
       id: row.id,
       userId: row.user_id,
       name: row.name,
-      description: row.description,
-      color: row.color,
-      icon: row.icon,
+      description: row.description || undefined,
+      color: row.color || undefined,
+      icon: row.icon || undefined,
       active: Boolean(row.active),
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
@@ -62,7 +63,7 @@ export class QueryBus {
       WHERE status = 'pending' 
       ORDER BY created_at ASC 
       LIMIT ?
-    `).all(limit) as any[];
+    `).all(limit) as PushTaskRow[];
     
     // Update status to processing
     const updateStmt = db.prepare(`
@@ -92,7 +93,7 @@ export class QueryBus {
       attempts: row.attempts,
       lastAttemptAt: new Date(now),
       completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
-      errorMessage: row.error_message,
+      errorMessage: row.error_message || undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     }));
@@ -103,7 +104,7 @@ export class QueryBus {
     
     const row = db.prepare(`
       SELECT * FROM push_tasks WHERE id = ?
-    `).get(taskId) as any;
+    `).get(taskId) as PushTaskRow | undefined;
     
     db.close();
     
@@ -117,11 +118,11 @@ export class QueryBus {
       title: row.title,
       message: row.message,
       data: row.data ? JSON.parse(row.data) : undefined,
-      status: row.status,
+      status: row.status as 'pending' | 'processing' | 'completed' | 'failed',
       attempts: row.attempts,
       lastAttemptAt: row.last_attempt_at ? new Date(row.last_attempt_at) : undefined,
       completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
-      errorMessage: row.error_message,
+      errorMessage: row.error_message || undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     };
@@ -133,7 +134,7 @@ export class QueryBus {
     const result = db.prepare(`
       SELECT COUNT(*) as count FROM notifications 
       WHERE user_id = ? AND status != 'read'
-    `).get(userId) as { count: number };
+    `).get(userId) as CountResult;
     
     db.close();
     

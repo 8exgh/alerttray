@@ -2,6 +2,8 @@ import { Event } from '@/types';
 import { EventStore } from './event-store';
 import { getReadModelDatabase, getAllUserIds } from '@/lib/infrastructure/database/connection';
 import { v4 as uuidv4 } from 'uuid';
+import type { NotificationRow, CountResult } from '@/types/db-types';
+import type Database from 'better-sqlite3';
 
 export class ProjectionEngine {
   private checkInterval = 1000; // 1 second
@@ -81,7 +83,7 @@ export class ProjectionEngine {
     db.close();
   }
   
-  private projectEvent(db: any, event: Event, userId: string): void {
+  private projectEvent(db: Database.Database, event: Event, userId: string): void {
     switch (event.eventType) {
       case 'NotificationPushedEvent':
         this.projectNotificationPushed(db, event, userId);
@@ -111,12 +113,12 @@ export class ProjectionEngine {
         this.projectDeviceRegistered(db, event, userId);
         break;
       case 'DeviceUnregisteredEvent':
-        this.projectDeviceUnregistered(db, event);
+        this.projectDeviceUnregistered();
         break;
     }
   }
   
-  private projectNotificationPushed(db: any, event: Event, userId: string): void {
+  private projectNotificationPushed(db: Database.Database, event: Event, userId: string): void {
     const { notificationId, purposeId, title, message, severity, metadata } = event.eventData;
     
     const insert = db.prepare(`
@@ -133,13 +135,13 @@ export class ProjectionEngine {
     );
   }
   
-  private projectPushTaskScheduled(db: any, event: Event): void {
+  private projectPushTaskScheduled(db: Database.Database, event: Event): void {
     const { taskId, notificationId, userId, deviceToken } = event.eventData;
     
     // Get notification details
     const notification = db.prepare(
       'SELECT title, message FROM notifications WHERE id = ?'
-    ).get(notificationId) as any;
+    ).get(notificationId) as Pick<NotificationRow, 'title' | 'message'> | undefined;
     
     if (!notification) return;
     
@@ -158,7 +160,7 @@ export class ProjectionEngine {
     );
   }
   
-  private projectPushTaskCompleted(db: any, event: Event): void {
+  private projectPushTaskCompleted(db: Database.Database, event: Event): void {
     const { taskId, notificationId, deliveredAt } = event.eventData;
     
     const updateTask = db.prepare(`
@@ -173,7 +175,7 @@ export class ProjectionEngine {
     // Check if all tasks for this notification are completed
     const pendingTasks = db.prepare(
       'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ? AND status = ?'
-    ).get(notificationId, 'pending') as { count: number };
+    ).get(notificationId, 'pending') as CountResult;
     
     if (pendingTasks.count === 0) {
       const updateNotification = db.prepare(`
@@ -185,7 +187,7 @@ export class ProjectionEngine {
     }
   }
   
-  private projectPushTaskFailed(db: any, event: Event): void {
+  private projectPushTaskFailed(db: Database.Database, event: Event): void {
     const { taskId, notificationId, errorMessage } = event.eventData;
     
     const updateTask = db.prepare(`
@@ -200,11 +202,11 @@ export class ProjectionEngine {
     // Check if all tasks for this notification have failed
     const failedTasks = db.prepare(
       'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ? AND status = ?'
-    ).get(notificationId, 'failed') as { count: number };
+    ).get(notificationId, 'failed') as CountResult;
     
     const totalTasks = db.prepare(
       'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ?'
-    ).get(notificationId) as { count: number };
+    ).get(notificationId) as CountResult;
     
     if (failedTasks.count === totalTasks.count) {
       const updateNotification = db.prepare(`
@@ -216,7 +218,7 @@ export class ProjectionEngine {
     }
   }
   
-  private projectNotificationRead(db: any, event: Event): void {
+  private projectNotificationRead(db: Database.Database, event: Event): void {
     const { notificationId } = event.eventData;
     
     const update = db.prepare(`
@@ -229,7 +231,7 @@ export class ProjectionEngine {
     update.run(now, now, notificationId);
   }
   
-  private projectPurposeCreated(db: any, event: Event, userId: string): void {
+  private projectPurposeCreated(db: Database.Database, event: Event, userId: string): void {
     const { purposeId, name, description, color, icon } = event.eventData;
     
     const insert = db.prepare(`
@@ -245,7 +247,7 @@ export class ProjectionEngine {
     );
   }
   
-  private projectPurposeActivated(db: any, event: Event): void {
+  private projectPurposeActivated(db: Database.Database, event: Event): void {
     const { purposeId } = event.eventData;
     
     const update = db.prepare(`
@@ -257,7 +259,7 @@ export class ProjectionEngine {
     update.run(new Date().toISOString(), purposeId);
   }
   
-  private projectPurposeDeactivated(db: any, event: Event): void {
+  private projectPurposeDeactivated(db: Database.Database, event: Event): void {
     const { purposeId } = event.eventData;
     
     const update = db.prepare(`
@@ -269,8 +271,8 @@ export class ProjectionEngine {
     update.run(new Date().toISOString(), purposeId);
   }
   
-  private projectDeviceRegistered(db: any, event: Event, userId: string): void {
-    const { deviceId, token, deviceName, platform } = event.eventData;
+  private projectDeviceRegistered(db: Database.Database, event: Event, userId: string): void {
+    const { token } = event.eventData;
     
     // Device is already registered in system database by the API endpoint
     // Here we need to check for pending notifications without push tasks
@@ -285,7 +287,7 @@ export class ProjectionEngine {
         WHERE pt.notification_id = n.id 
         AND pt.device_token = ?
       )
-    `).all(userId, token) as any[];
+    `).all(userId, token) as NotificationRow[];
     
     // Create push tasks for each pending notification
     const insertPushTask = db.prepare(`
@@ -312,9 +314,7 @@ export class ProjectionEngine {
     }
   }
   
-  private projectDeviceUnregistered(db: any, event: Event): void {
-    const { deviceId } = event.eventData;
-    
+  private projectDeviceUnregistered(): void {
     // We don't need to do anything here for the read model
     // The system database handles the actual device removal
     // Push tasks that were already created will remain and can fail naturally

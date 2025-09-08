@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { getSystemDatabase } from '../database/connection';
 import { User, Session } from '@/types';
+import type { UserRow } from '@/types/db-types';
 import { v4 as uuidv4 } from 'uuid';
 
 export class AuthService {
@@ -57,7 +58,7 @@ export class AuthService {
     const db = getSystemDatabase();
     
     try {
-      const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+      const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
       
       if (!row) {
         return null;
@@ -121,7 +122,7 @@ export class AuthService {
         FROM sessions s
         JOIN users u ON s.user_id = u.id
         WHERE s.token_hash = ? AND s.expires_at > ?
-      `).get(tokenHash, now) as any;
+      `).get(tokenHash, now) as (UserRow & { user_id: string; token_hash: string; expires_at: string }) | undefined;
       
       if (!row) {
         return null;
