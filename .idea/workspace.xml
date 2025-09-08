@@ -5,12 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.github/workflows/deploy-background-processor.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.github/workflows/deploy-statusnest.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/background_processor/Dockerfile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/nextjs_alerttray/.dockerignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/nextjs_alerttray/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.github/workflows/deploy-statusnest.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/deploy-alerttray.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -68,7 +63,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1757291338188</updated>
-      <workItem from="1757291339445" duration="4244000" />
+      <workItem from="1757291339445" duration="5171000" />
     </task>
     <servers />
   </component>

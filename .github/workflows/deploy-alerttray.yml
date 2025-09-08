@@ -1,4 +1,4 @@
-name: Build and Deploy StatusNest
+name: Build and Deploy AlertTray
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./nextjs_statusnest
+          context: ./nextjs_alerttray
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
