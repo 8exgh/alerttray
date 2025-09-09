@@ -1,9 +1,10 @@
 import Foundation
+import UIKit
 
 class APIService {
     static let shared = APIService()
     
-    private let baseURL = "http://localhost:3000"
+    private let baseURL = "https://alerttray.com"
     private var authToken: String?
     
     private init() {}
