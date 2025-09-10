@@ -125,17 +125,31 @@ export async function withInternalAuth(
     const apiKey = request.headers.get('X-API-Key');
     const signature = request.headers.get('X-Signature');
     
+    // Log authentication attempt
+    console.log(`🔐 Internal API auth attempt:`);
+    console.log(`  - Method: ${request.method}`);
+    console.log(`  - URL: ${request.url}`);
+    console.log(`  - X-API-Key received: ${apiKey ? apiKey.substring(0, 3) + '...' : 'None'}`);
+    console.log(`  - Expected key starts with: ${INTERNAL_API_KEY.substring(0, 3)}...`);
+    console.log(`  - X-Signature received: ${signature ? signature.substring(0, 8) + '...' : 'None'}`);
+    
     if (!apiKey || apiKey !== INTERNAL_API_KEY) {
+      console.log(`  ❌ API Key mismatch - received: ${apiKey ? 'present but wrong' : 'missing'}`);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
     // For GET requests, verify empty body signature
     if (request.method === 'GET') {
+      const expectedSig = createSignature('');
+      console.log(`  - Expected signature: ${expectedSig.substring(0, 8)}...`);
+      
       if (!signature || !verifySignature('', signature)) {
+        console.log(`  ❌ Signature verification failed`);
         return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
       }
     }
     
+    console.log(`  ✅ Authentication successful`);
     return await handler(request);
   } catch (error) {
     console.error('Internal API error:', error);

@@ -15,7 +15,7 @@ export class ApnsClient {
     this.bundleId = process.env.APNS_BUNDLE_ID || '';
     
     // Try to load the private key if it exists
-    const keyPath = path.join(__dirname, '..', 'certificates', 'AuthKey.p8');
+    const keyPath = path.join(__dirname, '..', 'data', 'certificates', 'AuthKey.p8');
     if (fs.existsSync(keyPath)) {
       try {
         this.privateKey = fs.readFileSync(keyPath, 'utf8');

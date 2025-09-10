@@ -4,7 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="" />
+    <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/background_processor/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/background_processor/certificates/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/background_processor/src/api-client.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/api-client.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/background_processor/src/apns-client.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/apns-client.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/background_processor/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/lib/infrastructure/security/api-security.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/lib/infrastructure/security/api-security.ts" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -13,9 +21,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 1
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 1
+}</component>
   <component name="ProjectId" id="32OUuuLPROjARRSf4k9F1l5g06g" />
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="1" id="Add" />
@@ -30,21 +38,26 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/sean/8Examples/alerttray/nextjs_alerttray",
+    "last_opened_file_path": "/Users/sean/8Examples/alerttray/background_processor/certificates",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
+    "ts.external.directory.path": "/Users/sean/8Examples/alerttray/nextjs_alerttray/node_modules/typescript/lib",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/background_processor/certificates" />
       <recent name="$PROJECT_DIR$/nextjs_alerttray" />
       <recent name="$PROJECT_DIR$/background_processor" />
       <recent name="$PROJECT_DIR$/.github/workflows" />
       <recent name="$PROJECT_DIR$" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/background_processor/data" />
     </key>
   </component>
   <component name="SharedIndexes">
@@ -62,6 +75,8 @@
       <option name="presentableId" value="Default" />
       <updated>1757291338188</updated>
       <workItem from="1757291339445" duration="9340000" />
+      <workItem from="1757465815886" duration="1120000" />
+      <workItem from="1757513409396" duration="1629000" />
     </task>
     <servers />
   </component>

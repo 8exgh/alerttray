@@ -21,16 +21,24 @@ class BackgroundProcessor {
   }
   
   async start(): Promise<void> {
-    console.log('Background processor started');
-    console.log(`API URL: ${process.env.ALERTTRAY_API_URL || 'http://localhost:3000'}`);
-    console.log(`Check interval: ${this.checkInterval}ms`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log('🚀 Background processor started');
+    console.log(`  - API URL: ${process.env.ALERTTRAY_API_URL || 'http://localhost:3000'}`);
+    console.log(`  - Check interval: ${this.checkInterval}ms`);
+    console.log(`  - Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`  - API_KEY present: ${process.env.API_KEY ? 'Yes' : 'No'}`);
+    console.log(`  - BACKGROUND_PROCESSOR_API_KEY present: ${process.env.BACKGROUND_PROCESSOR_API_KEY ? 'Yes' : 'No'}`);
+    
+    let iterationCount = 0;
     
     while (true) {
       try {
+        iterationCount++;
+        if (iterationCount % 12 === 1) { // Log every minute (5s * 12 = 60s)
+          console.log(`⏰ Processing cycle #${iterationCount} at ${new Date().toISOString()}`);
+        }
         await this.processPendingTasks();
       } catch (error) {
-        console.error('Error in processing loop:', error);
+        console.error('❌ Error in processing loop:', error);
       }
       
       await this.sleep(this.checkInterval);
