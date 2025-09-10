@@ -49,15 +49,44 @@ struct LoginView: View {
     }
     
     func login() {
+        print("🟢 Login button pressed")
+        print("🟢 Email entered: \(email)")
+        print("🟢 Password length: \(password.count) characters")
+        
+        guard !email.isEmpty && !password.isEmpty else {
+            print("⚠️ Empty email or password")
+            errorMessage = "Please enter both email and password"
+            showingError = true
+            return
+        }
+        
         Task {
             do {
-                _ = try await APIService.shared.login(email: email, password: password)
+                print("🟢 Starting login task...")
+                let user = try await APIService.shared.login(email: email, password: password)
+                print("🟢 Login successful for user: \(user.email)")
+                
                 await MainActor.run {
+                    print("🟢 Setting isLoggedIn to true")
                     isLoggedIn = true
                 }
             } catch {
+                print("🔴 Login failed with error: \(error)")
+                
                 await MainActor.run {
-                    errorMessage = "Login failed. Please check your credentials."
+                    if let apiError = error as? APIError {
+                        switch apiError {
+                        case .invalidCredentials:
+                            errorMessage = "Invalid email or password"
+                        case .notAuthenticated:
+                            errorMessage = "Authentication required"
+                        case .requestFailed:
+                            errorMessage = "Network request failed"
+                        }
+                    } else {
+                        errorMessage = "Login failed: \(error.localizedDescription)"
+                    }
+                    print("🔴 Showing error: \(errorMessage)")
                     showingError = true
                 }
             }

@@ -32,10 +32,11 @@ export async function POST(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email
-      }
+      },
+      token: token // Include token in response for mobile clients
     });
     
-    // Set session cookie
+    // Set session cookie for web clients
     response.cookies.set('session', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

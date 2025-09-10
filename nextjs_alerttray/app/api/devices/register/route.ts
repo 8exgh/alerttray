@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/infrastructure/security/auth';
+import { validateRequest } from '@/lib/infrastructure/security/auth-middleware';
 import { getSystemDatabase } from '@/lib/infrastructure/database/connection';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,20 +10,11 @@ export async function POST(request: NextRequest) {
   await initializeSystem();
   
   try {
-    const sessionToken = request.cookies.get('session')?.value;
-    
-    if (!sessionToken) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-    
-    const sessionData = await AuthService.validateSession(sessionToken);
+    const sessionData = await validateRequest(request);
     
     if (!sessionData) {
       return NextResponse.json(
-        { error: 'Invalid session' },
+        { error: 'Authentication required' },
         { status: 401 }
       );
     }

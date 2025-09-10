@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/infrastructure/security/auth';
+import { validateRequest } from '@/lib/infrastructure/security/auth-middleware';
 import { ApiSecurity } from '@/lib/infrastructure/security/api-security';
 
 export async function GET(request: NextRequest) {
   try {
-    const sessionToken = request.cookies.get('session')?.value;
-    
-    if (!sessionToken) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-    
-    const sessionData = await AuthService.validateSession(sessionToken);
+    const sessionData = await validateRequest(request);
     
     if (!sessionData) {
       return NextResponse.json(
-        { error: 'Invalid session' },
+        { error: 'Authentication required' },
         { status: 401 }
       );
     }
