@@ -6,12 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="4b251cf2-897e-4738-af63-52c6fdada0fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/background_processor/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/background_processor/certificates/README.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/background_processor/src/api-client.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/api-client.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/background_processor/src/apns-client.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/apns-client.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/background_processor/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/background_processor/src/index.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nextjs_alerttray/lib/infrastructure/security/api-security.ts" beforeDir="false" afterPath="$PROJECT_DIR$/nextjs_alerttray/lib/infrastructure/security/api-security.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -32,22 +26,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/sean/8Examples/alerttray/background_processor/certificates",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "ts.external.directory.path": "/Users/sean/8Examples/alerttray/nextjs_alerttray/node_modules/typescript/lib",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/sean/8Examples/alerttray/background_processor/certificates&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;/Users/sean/8Examples/alerttray/nextjs_alerttray/node_modules/typescript/lib&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/background_processor/certificates" />
@@ -76,7 +70,11 @@
       <updated>1757291338188</updated>
       <workItem from="1757291339445" duration="9340000" />
       <workItem from="1757465815886" duration="1120000" />
-      <workItem from="1757513409396" duration="1629000" />
+      <workItem from="1757513409396" duration="8497000" />
+      <workItem from="1758161158506" duration="1206000" />
+      <workItem from="1758906059779" duration="3394000" />
+      <workItem from="1760142455176" duration="597000" />
+      <workItem from="1760627729817" duration="592000" />
     </task>
     <servers />
   </component>
