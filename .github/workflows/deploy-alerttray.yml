@@ -57,4 +57,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
             https://api.github.com/repos/${{ github.repository_owner }}/devops/dispatches \
-            -d '{"event_type":"deploy-nextjs-alerttray","client_payload":{"image_tag":"${{ steps.build_info.outputs.timestamp }}"}}'
+            -d '{"event_type":"deploy-nextjs-alerttray","client_payload":{"image_tag":"latest"}}'
