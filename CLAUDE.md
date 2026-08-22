@@ -78,6 +78,7 @@ Defined in one place: `nextjs_alerttray/lib/delivery/routing-policy.ts` (`SEVERI
 5. Background processor polls `/api/internal/tasks` every 5 seconds (tasks are atomically moved to `processing`)
 6. `DeliveryDispatcher` sends on the task's channel (APNS / gateway `/orchestrations` / gateway `/sms` / SMTP) and reports via `/api/internal/push-result` → `DeliveryTaskCompletedEvent` / `DeliveryTaskFailedEvent`
 7. A notification is `delivered` when no tasks are pending/processing, `failed` only when every task failed
+8. Tasks left in `processing` for 15 minutes without a result (processor crashed, or an out-of-date processor claimed them) are re-queued on the next poll by `QueryBus.reclaimStaleTasks`; after 3 attempts they are failed via `FailDeliveryTask`
 
 Legacy `PushTask*` events are still projected (as `channel: 'apns'`); an existing `push_tasks` table is migrated into `delivery_tasks` on first open and renamed `push_tasks_legacy`.
 

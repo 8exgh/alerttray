@@ -113,6 +113,52 @@ export class QueryBus {
     return rows.map(row => this.mapDeliveryTask(row));
   }
   
+  /**
+   * Tasks claimed by a processor that never reported back (crashed mid-send,
+   * or an out-of-date processor that cannot handle the task) would otherwise
+   * sit in 'processing' forever. After a generous timeout — a voice call can
+   * legitimately take a few minutes — un-claim them so they are handed out
+   * again. Tasks that have already been handed out MAX_ATTEMPTS times are
+   * returned instead so the caller can fail them through the event stream.
+   */
+  async reclaimStaleTasks(): Promise<{ requeued: number; abandoned: DeliveryTask[] }> {
+    const STALE_AFTER_MS = 15 * 60 * 1000;
+    const MAX_ATTEMPTS = 3;
+    const db = getReadModelDatabase();
+    const cutoff = new Date(Date.now() - STALE_AFTER_MS).toISOString();
+    const now = new Date().toISOString();
+    
+    const stale = db.prepare(`
+      SELECT * FROM delivery_tasks WHERE status = 'processing' AND last_attempt_at < ?
+    `).all(cutoff) as DeliveryTaskRow[];
+    
+    const requeue = db.prepare(`
+      UPDATE delivery_tasks
+      SET status = 'pending', attempts = attempts + 1, updated_at = ?,
+          error_message = 'requeued: no result reported within 15 minutes'
+      WHERE id = ? AND status = 'processing'
+    `);
+    
+    const abandoned: DeliveryTask[] = [];
+    let requeued = 0;
+    db.transaction(() => {
+      for (const row of stale) {
+        if (row.attempts + 1 < MAX_ATTEMPTS) {
+          requeued += requeue.run(now, row.id).changes;
+        } else {
+          abandoned.push(this.mapDeliveryTask(row));
+        }
+      }
+    })();
+    
+    db.close();
+    
+    if (requeued || abandoned.length) {
+      console.warn(`⚠️  delivery tasks stuck in processing: requeued ${requeued}, abandoned ${abandoned.length}`);
+    }
+    return { requeued, abandoned };
+  }
+  
   private mapDeliveryTask(row: DeliveryTaskRow): DeliveryTask {
     return {
       id: row.id,
