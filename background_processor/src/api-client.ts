@@ -1,21 +1,31 @@
 import { createHmac } from 'crypto';
 import fetch from 'node-fetch';
 
-interface PushTask {
+export type Channel = 'apns' | 'call' | 'sms' | 'email' | 'emergency';
+export type Severity = 'low' | 'medium' | 'high' | 'critical';
+
+/** One delivery of one notification to one recipient over one channel. */
+export interface DeliveryTask {
   id: string;
   notificationId: string;
   userId: string;
-  deviceToken: string;
+  channel: Channel;
+  /** Device token (apns), E.164 phone number (call/sms) or email address (email). */
+  recipient: string;
   title: string;
   message: string;
+  severity: Severity;
   data?: Record<string, any>;
+  attempts: number;
 }
 
-interface PushResult {
+export interface DeliveryResult {
   taskId: string;
   notificationId: string;
   success: boolean;
   errorMessage?: string;
+  /** Provider-side id: APNS id, gateway call/sms sid, email message id. */
+  providerMessageId?: string;
 }
 
 function assert(condition: any, message: string): asserts condition {
@@ -46,13 +56,9 @@ export class ApiClient {
       .digest('hex');
   }
   
-  async getPendingTasks(): Promise<PushTask[]> {
+  async getPendingTasks(): Promise<DeliveryTask[]> {
     const url = `${this.baseUrl}/api/internal/tasks`;
     const signature = this.createSignature('');
-    
-    console.log(`📡 GET ${url}`);
-    console.log(`  - X-API-Key: ${this.apiKey.substring(0, 3)}...`);
-    console.log(`  - X-Signature: ${signature.substring(0, 8)}...`);
     
     try {
       const response = await fetch(url, {
@@ -62,17 +68,16 @@ export class ApiClient {
         }
       });
       
-      console.log(`  - Response Status: ${response.status} ${response.statusText}`);
-      console.log(`  - Response Headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`);
-      
       if (!response.ok) {
         const responseBody = await response.text();
-        console.log(`  - Response Body: ${responseBody}`);
+        console.log(`📡 GET ${url} → ${response.status} ${response.statusText}: ${responseBody}`);
         throw new Error(`Failed to get tasks: ${response.statusText}`);
       }
       
-      const data = await response.json() as { tasks: PushTask[] };
-      console.log(`  ✅ Received ${data.tasks?.length || 0} tasks`);
+      const data = await response.json() as { tasks: DeliveryTask[] };
+      if (data.tasks?.length) {
+        console.log(`📡 GET ${url} → ${data.tasks.length} task(s)`);
+      }
       return data.tasks || [];
     } catch (error) {
       console.error('❌ Error getting pending tasks:', error);
@@ -80,15 +85,10 @@ export class ApiClient {
     }
   }
   
-  async reportPushResult(result: PushResult): Promise<void> {
+  async reportResult(result: DeliveryResult): Promise<void> {
     const body = JSON.stringify(result);
     const url = `${this.baseUrl}/api/internal/push-result`;
     const signature = this.createSignature(body);
-    
-    console.log(`📡 POST ${url}`);
-    console.log(`  - X-API-Key: ${this.apiKey.substring(0, 3)}...`);
-    console.log(`  - X-Signature: ${signature.substring(0, 8)}...`);
-    console.log(`  - Body: ${body.substring(0, 100)}${body.length > 100 ? '...' : ''}`);
     
     try {
       const response = await fetch(url, {
@@ -101,17 +101,13 @@ export class ApiClient {
         body
       });
       
-      console.log(`  - Response Status: ${response.status} ${response.statusText}`);
-      
       if (!response.ok) {
         const responseBody = await response.text();
-        console.log(`  - Response Body: ${responseBody}`);
+        console.log(`📡 POST ${url} → ${response.status} ${response.statusText}: ${responseBody}`);
         throw new Error(`Failed to report result: ${response.statusText}`);
       }
-      
-      console.log(`  ✅ Push result reported successfully`);
     } catch (error) {
-      console.error('❌ Error reporting push result:', error);
+      console.error('❌ Error reporting delivery result:', error);
       throw error;
     }
   }

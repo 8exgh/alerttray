@@ -1,12 +1,32 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import type { LegacyPushTaskRow } from '@/types/db-types';
 
 const DATABASE_PATH = process.env.DATABASE_PATH || './data';
 
 export function ensureDirectoryExists(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+function tableExists(db: Database.Database, table: string): boolean {
+  const row = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table);
+  return !!row;
+}
+
+function columnExists(db: Database.Database, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some(c => c.name === column);
+}
+
+/** Idempotently add a column to an existing table (SQLite has no ADD COLUMN IF NOT EXISTS). */
+function ensureColumn(db: Database.Database, table: string, column: string, ddl: string): void {
+  if (!columnExists(db, table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
   }
 }
 
@@ -52,6 +72,8 @@ export function getSystemDatabase(): Database.Database {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      phone_number TEXT,
+      notification_email TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
@@ -92,6 +114,10 @@ export function getSystemDatabase(): Database.Database {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_device_token ON device_tokens(token);
     CREATE INDEX IF NOT EXISTS idx_device_user ON device_tokens(user_id);
   `);
+
+  // Migrations for databases created before contact details existed.
+  ensureColumn(db, 'users', 'phone_number', 'TEXT');
+  ensureColumn(db, 'users', 'notification_email', 'TEXT');
   
   return db;
 }
@@ -123,13 +149,16 @@ export function getReadModelDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_notification_status ON notifications(status);
     CREATE INDEX IF NOT EXISTS idx_notification_created ON notifications(created_at DESC);
     
-    CREATE TABLE IF NOT EXISTS push_tasks (
+    -- One row per (notification, channel, recipient). Replaces the APNS-only push_tasks table.
+    CREATE TABLE IF NOT EXISTS delivery_tasks (
       id TEXT PRIMARY KEY,
       notification_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
-      device_token TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN ('apns', 'call', 'sms', 'email', 'emergency')),
+      recipient TEXT NOT NULL,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
+      severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high', 'critical')),
       data JSON,
       status TEXT CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
       attempts INTEGER DEFAULT 0,
@@ -139,8 +168,9 @@ export function getReadModelDatabase(): Database.Database {
       created_at TIMESTAMP,
       updated_at TIMESTAMP
     );
-    CREATE INDEX IF NOT EXISTS idx_push_task_status ON push_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_push_task_notification ON push_tasks(notification_id);
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_status ON delivery_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_notification ON delivery_tasks(notification_id);
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_channel ON delivery_tasks(channel);
     
     CREATE TABLE IF NOT EXISTS notification_purposes (
       id TEXT PRIMARY KEY,
@@ -162,8 +192,44 @@ export function getReadModelDatabase(): Database.Database {
       last_processed_at TIMESTAMP
     );
   `);
+
+  migrateLegacyPushTasks(db);
   
   return db;
+}
+
+/**
+ * One-time migration: copy rows from the pre-multichannel `push_tasks` table
+ * into `delivery_tasks` as channel='apns'. The old table is left in place
+ * (renamed) so nothing is destroyed; it can be dropped by hand later.
+ */
+function migrateLegacyPushTasks(db: Database.Database): void {
+  if (!tableExists(db, 'push_tasks')) return;
+
+  const rows = db.prepare('SELECT * FROM push_tasks').all() as LegacyPushTaskRow[];
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO delivery_tasks (
+      id, notification_id, user_id, channel, recipient, title, message, severity,
+      data, status, attempts, last_attempt_at, completed_at, error_message,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, 'apns', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const severityOf = db.prepare('SELECT severity FROM notifications WHERE id = ?');
+
+  db.transaction(() => {
+    for (const row of rows) {
+      const n = severityOf.get(row.notification_id) as { severity: string } | undefined;
+      insert.run(
+        row.id, row.notification_id, row.user_id, row.device_token,
+        row.title, row.message, n?.severity ?? 'medium',
+        row.data, row.status, row.attempts, row.last_attempt_at,
+        row.completed_at, row.error_message, row.created_at, row.updated_at
+      );
+    }
+    db.exec('ALTER TABLE push_tasks RENAME TO push_tasks_legacy');
+  })();
+
+  console.log(`Migrated ${rows.length} legacy push_tasks rows into delivery_tasks`);
 }
 
 export function getAllUserIds(): string[] {

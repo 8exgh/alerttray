@@ -1,3 +1,6 @@
+import type { Severity, Channel } from '@/lib/delivery/routing-policy';
+export type { Severity, Channel } from '@/lib/delivery/routing-policy';
+
 export interface Event {
   id?: number;
   aggregateId: string;
@@ -23,7 +26,7 @@ export interface NotificationPushedEvent {
   purposeId: string;
   title: string;
   message: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
+  severity: Severity;
   metadata?: Record<string, any>;
   timestamp: Date;
 }
@@ -47,6 +50,46 @@ export interface PushTaskFailedEvent {
   taskId: string;
   notificationId: string;
   errorMessage: string;
+  timestamp: Date;
+}
+
+/**
+ * A notification was routed to a delivery channel (push, call, sms, email).
+ * Supersedes PushTaskScheduledEvent, which is kept for replaying old streams
+ * and is equivalent to { channel: 'apns', recipient: deviceToken }.
+ */
+export interface DeliveryTaskScheduledEvent {
+  taskId: string;
+  notificationId: string;
+  userId: string;
+  channel: Channel;
+  recipient: string;
+  severity: Severity;
+  timestamp: Date;
+}
+
+export interface DeliveryTaskCompletedEvent {
+  taskId: string;
+  notificationId: string;
+  channel: Channel;
+  deliveredAt: Date;
+  /** Provider-side id (APNS id, gateway call/sms id, email message id). */
+  providerMessageId?: string;
+  timestamp: Date;
+}
+
+export interface DeliveryTaskFailedEvent {
+  taskId: string;
+  notificationId: string;
+  channel: Channel;
+  errorMessage: string;
+  timestamp: Date;
+}
+
+export interface ContactDetailsUpdatedEvent {
+  userId: string;
+  phoneNumber: string | null;
+  notificationEmail: string | null;
   timestamp: Date;
 }
 
@@ -109,6 +152,10 @@ export interface User {
   id: string;
   email: string;
   passwordHash: string;
+  /** E.164 phone number used for call/sms alerts. */
+  phoneNumber?: string | null;
+  /** Address alerts are emailed to; falls back to `email` when unset. */
+  notificationEmail?: string | null;
   createdAt: Date;
 }
 
@@ -146,7 +193,7 @@ export interface Notification {
   purposeId: string;
   title: string;
   message: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
+  severity: Severity;
   metadata?: Record<string, any>;
   status: 'pending' | 'delivered' | 'failed' | 'read';
   deliveredAt?: Date;
@@ -155,15 +202,24 @@ export interface Notification {
   updatedAt: Date;
 }
 
-export interface PushTask {
+export type DeliveryTaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+/**
+ * One unit of work for the background processor: deliver a notification to
+ * one recipient over one channel.
+ */
+export interface DeliveryTask {
   id: string;
   notificationId: string;
   userId: string;
-  deviceToken: string;
+  channel: Channel;
+  /** Device token (apns), E.164 phone number (call/sms) or email address (email). */
+  recipient: string;
   title: string;
   message: string;
+  severity: Severity;
   data?: Record<string, any>;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: DeliveryTaskStatus;
   attempts: number;
   lastAttemptAt?: Date;
   completedAt?: Date;

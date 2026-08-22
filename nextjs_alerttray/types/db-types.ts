@@ -20,6 +20,8 @@ export interface UserRow {
   id: string;
   email: string;
   password_hash: string;
+  phone_number: string | null;
+  notification_email: string | null;
   created_at: string;
 }
 
@@ -71,7 +73,27 @@ export interface NotificationRow {
   updated_at: string;
 }
 
-export interface PushTaskRow {
+export interface DeliveryTaskRow {
+  id: string;
+  notification_id: string;
+  user_id: string;
+  channel: string;
+  recipient: string;
+  title: string;
+  message: string;
+  severity: string;
+  data: string | null;
+  status: string;
+  attempts: number;
+  last_attempt_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Shape of the pre-multichannel `push_tasks` table; only used for the one-time migration. */
+export interface LegacyPushTaskRow {
   id: string;
   notification_id: string;
   user_id: string;

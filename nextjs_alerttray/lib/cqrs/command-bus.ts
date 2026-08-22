@@ -1,5 +1,6 @@
 import { Command, Event } from '@/types';
 import { EventStore, assert } from './event-store';
+import { isChannel, isSeverity, type DeliveryTarget } from '@/lib/delivery/routing-policy';
 import { v4 as uuidv4 } from 'uuid';
 
 export class CommandBus {
@@ -24,10 +25,12 @@ export class CommandBus {
     switch (command.type) {
       case 'PushNotification':
         return this.handlePushNotification(command);
-      case 'CompletePushTask':
-        return this.handleCompletePushTask(command);
-      case 'FailPushTask':
-        return this.handleFailPushTask(command);
+      case 'CompleteDeliveryTask':
+        return this.handleCompleteDeliveryTask(command);
+      case 'FailDeliveryTask':
+        return this.handleFailDeliveryTask(command);
+      case 'UpdateContactDetails':
+        return this.handleUpdateContactDetails(command);
       case 'MarkNotificationRead':
         return this.handleMarkNotificationRead(command);
       case 'CreatePurpose':
@@ -48,7 +51,10 @@ export class CommandBus {
   }
   
   private handlePushNotification(command: Command): Event[] {
-    const { purposeId, title, message, severity, metadata, deviceTokens } = command.payload;
+    const { purposeId, title, message, severity, metadata } = command.payload;
+    const deliveries = (command.payload.deliveries ?? []) as DeliveryTarget[];
+    assert(isSeverity(severity), `Invalid severity: ${severity}`);
+    
     const notificationId = command.aggregateId || uuidv4();
     const now = new Date();
     
@@ -73,19 +79,23 @@ export class CommandBus {
       }
     ];
     
-    // Create push task for each device token
-    for (const deviceToken of deviceTokens) {
+    // One delivery task per (channel, recipient) the routing policy resolved
+    for (const { channel, recipient } of deliveries) {
+      assert(isChannel(channel), `Invalid channel: ${channel}`);
+      assert(recipient, `Recipient required for ${channel} delivery`);
       const taskId = uuidv4();
       events.push({
         aggregateId: taskId,
-        aggregateType: 'PushTask',
-        eventType: 'PushTaskScheduledEvent',
+        aggregateType: 'DeliveryTask',
+        eventType: 'DeliveryTaskScheduledEvent',
         eventVersion: 1,
         eventData: {
           taskId,
           notificationId,
           userId: command.userId,
-          deviceToken,
+          channel,
+          recipient,
+          severity,
           timestamp: now
         },
         createdAt: now,
@@ -96,18 +106,20 @@ export class CommandBus {
     return events;
   }
   
-  private handleCompletePushTask(command: Command): Event[] {
-    const { taskId, notificationId } = command.payload;
+  private handleCompleteDeliveryTask(command: Command): Event[] {
+    const { taskId, notificationId, channel, providerMessageId } = command.payload;
     const now = new Date();
     
     return [{
       aggregateId: taskId,
-      aggregateType: 'PushTask',
-      eventType: 'PushTaskCompletedEvent',
+      aggregateType: 'DeliveryTask',
+      eventType: 'DeliveryTaskCompletedEvent',
       eventVersion: 1,
       eventData: {
         taskId,
         notificationId,
+        channel,
+        providerMessageId,
         deliveredAt: now,
         timestamp: now
       },
@@ -116,19 +128,40 @@ export class CommandBus {
     }];
   }
   
-  private handleFailPushTask(command: Command): Event[] {
-    const { taskId, notificationId, errorMessage } = command.payload;
+  private handleFailDeliveryTask(command: Command): Event[] {
+    const { taskId, notificationId, channel, errorMessage } = command.payload;
     const now = new Date();
     
     return [{
       aggregateId: taskId,
-      aggregateType: 'PushTask',
-      eventType: 'PushTaskFailedEvent',
+      aggregateType: 'DeliveryTask',
+      eventType: 'DeliveryTaskFailedEvent',
       eventVersion: 1,
       eventData: {
         taskId,
         notificationId,
+        channel,
         errorMessage,
+        timestamp: now
+      },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+  }
+  
+  private handleUpdateContactDetails(command: Command): Event[] {
+    const { phoneNumber = null, notificationEmail = null } = command.payload;
+    const now = new Date();
+    
+    return [{
+      aggregateId: command.userId,
+      aggregateType: 'User',
+      eventType: 'ContactDetailsUpdatedEvent',
+      eventVersion: 1,
+      eventData: {
+        userId: command.userId,
+        phoneNumber,
+        notificationEmail,
         timestamp: now
       },
       createdAt: now,

@@ -3,13 +3,18 @@ import { withInternalAuth, createInternalResponse } from '@/lib/infrastructure/s
 import { QueryBus } from '@/lib/cqrs/query-bus';
 import { initializeSystem } from '@/lib/startup';
 
+/**
+ * Background processor polls this for pending delivery tasks across all
+ * channels (apns, call, sms, email). Returned tasks are atomically marked
+ * 'processing' so they are handed out exactly once.
+ */
 export async function GET(request: NextRequest) {
   await initializeSystem();
   
   return withInternalAuth(request, async () => {
     try {
       const queryBus = new QueryBus();
-      const tasks = await queryBus.getPendingPushTasks();
+      const tasks = await queryBus.getPendingDeliveryTasks();
       
       return createInternalResponse({ 
         success: true,

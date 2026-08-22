@@ -3,6 +3,7 @@ import { EventStore } from './event-store';
 import { getReadModelDatabase, getAllUserIds } from '@/lib/infrastructure/database/connection';
 import { v4 as uuidv4 } from 'uuid';
 import type { NotificationRow, CountResult } from '@/types/db-types';
+import type { Channel } from '@/lib/delivery/routing-policy';
 import type Database from 'better-sqlite3';
 
 export class ProjectionEngine {
@@ -88,14 +89,30 @@ export class ProjectionEngine {
       case 'NotificationPushedEvent':
         this.projectNotificationPushed(db, event, userId);
         break;
+      case 'DeliveryTaskScheduledEvent':
+        this.projectDeliveryTaskScheduled(db, event);
+        break;
+      case 'DeliveryTaskCompletedEvent':
+        this.projectDeliveryTaskCompleted(db, event);
+        break;
+      case 'DeliveryTaskFailedEvent':
+        this.projectDeliveryTaskFailed(db, event);
+        break;
+      // Legacy APNS-only events (streams written before multi-channel delivery)
       case 'PushTaskScheduledEvent':
-        this.projectPushTaskScheduled(db, event);
+        this.projectDeliveryTaskScheduled(db, {
+          ...event,
+          eventData: { ...event.eventData, channel: 'apns', recipient: event.eventData.deviceToken }
+        });
         break;
       case 'PushTaskCompletedEvent':
-        this.projectPushTaskCompleted(db, event);
+        this.projectDeliveryTaskCompleted(db, event);
         break;
       case 'PushTaskFailedEvent':
-        this.projectPushTaskFailed(db, event);
+        this.projectDeliveryTaskFailed(db, event);
+        break;
+      case 'ContactDetailsUpdatedEvent':
+        // Contact details live in the system database; nothing to project.
         break;
       case 'NotificationReadEvent':
         this.projectNotificationRead(db, event);
@@ -135,36 +152,37 @@ export class ProjectionEngine {
     );
   }
   
-  private projectPushTaskScheduled(db: Database.Database, event: Event): void {
-    const { taskId, notificationId, userId, deviceToken } = event.eventData;
+  private projectDeliveryTaskScheduled(db: Database.Database, event: Event): void {
+    const { taskId, notificationId, userId, channel, recipient } = event.eventData;
     
     // Get notification details
     const notification = db.prepare(
-      'SELECT title, message FROM notifications WHERE id = ?'
-    ).get(notificationId) as Pick<NotificationRow, 'title' | 'message'> | undefined;
+      'SELECT title, message, severity FROM notifications WHERE id = ?'
+    ).get(notificationId) as Pick<NotificationRow, 'title' | 'message' | 'severity'> | undefined;
     
     if (!notification) return;
     
     const insert = db.prepare(`
-      INSERT INTO push_tasks (
-        id, notification_id, user_id, device_token, 
-        title, message, data, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      INSERT OR IGNORE INTO delivery_tasks (
+        id, notification_id, user_id, channel, recipient,
+        title, message, severity, data, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `);
     
     const now = new Date().toISOString();
     insert.run(
-      taskId, notificationId, userId, deviceToken,
+      taskId, notificationId, userId, channel, recipient,
       notification.title, notification.message,
+      event.eventData.severity ?? notification.severity,
       JSON.stringify({ notificationId }), now, now
     );
   }
   
-  private projectPushTaskCompleted(db: Database.Database, event: Event): void {
+  private projectDeliveryTaskCompleted(db: Database.Database, event: Event): void {
     const { taskId, notificationId, deliveredAt } = event.eventData;
     
     const updateTask = db.prepare(`
-      UPDATE push_tasks 
+      UPDATE delivery_tasks 
       SET status = 'completed', completed_at = ?, updated_at = ?
       WHERE id = ?
     `);
@@ -172,26 +190,26 @@ export class ProjectionEngine {
     const now = new Date().toISOString();
     updateTask.run(deliveredAt, now, taskId);
     
-    // Check if all tasks for this notification are completed
-    const pendingTasks = db.prepare(
-      'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ? AND status = ?'
-    ).get(notificationId, 'pending') as CountResult;
+    // Notification is delivered once nothing is still pending or in flight
+    const outstanding = db.prepare(
+      "SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ? AND status IN ('pending', 'processing')"
+    ).get(notificationId) as CountResult;
     
-    if (pendingTasks.count === 0) {
+    if (outstanding.count === 0) {
       const updateNotification = db.prepare(`
         UPDATE notifications 
         SET status = 'delivered', delivered_at = ?, updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status = 'pending'
       `);
       updateNotification.run(deliveredAt, now, notificationId);
     }
   }
   
-  private projectPushTaskFailed(db: Database.Database, event: Event): void {
+  private projectDeliveryTaskFailed(db: Database.Database, event: Event): void {
     const { taskId, notificationId, errorMessage } = event.eventData;
     
     const updateTask = db.prepare(`
-      UPDATE push_tasks 
+      UPDATE delivery_tasks 
       SET status = 'failed', error_message = ?, updated_at = ?, attempts = attempts + 1
       WHERE id = ?
     `);
@@ -199,20 +217,20 @@ export class ProjectionEngine {
     const now = new Date().toISOString();
     updateTask.run(errorMessage, now, taskId);
     
-    // Check if all tasks for this notification have failed
+    // Notification only fails when every channel has failed
     const failedTasks = db.prepare(
-      'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ? AND status = ?'
+      'SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ? AND status = ?'
     ).get(notificationId, 'failed') as CountResult;
     
     const totalTasks = db.prepare(
-      'SELECT COUNT(*) as count FROM push_tasks WHERE notification_id = ?'
+      'SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ?'
     ).get(notificationId) as CountResult;
     
     if (failedTasks.count === totalTasks.count) {
       const updateNotification = db.prepare(`
         UPDATE notifications 
         SET status = 'failed', updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status = 'pending'
       `);
       updateNotification.run(now, notificationId);
     }
@@ -277,36 +295,40 @@ export class ProjectionEngine {
     // Device is already registered in system database by the API endpoint
     // Here we need to check for pending notifications without push tasks
     
-    // Find all notifications for this user that don't have push tasks for this device
+    // Find all notifications for this user that don't have an APNS task for this device
+    const channel: Channel = 'apns';
     const pendingNotifications = db.prepare(`
       SELECT n.* FROM notifications n
       WHERE n.user_id = ? 
       AND n.status = 'pending'
       AND NOT EXISTS (
-        SELECT 1 FROM push_tasks pt 
-        WHERE pt.notification_id = n.id 
-        AND pt.device_token = ?
+        SELECT 1 FROM delivery_tasks dt 
+        WHERE dt.notification_id = n.id 
+        AND dt.channel = ?
+        AND dt.recipient = ?
       )
-    `).all(userId, token) as NotificationRow[];
+    `).all(userId, channel, token) as NotificationRow[];
     
     // Create push tasks for each pending notification
-    const insertPushTask = db.prepare(`
-      INSERT INTO push_tasks (
-        id, notification_id, user_id, device_token, 
-        title, message, data, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    const insertTask = db.prepare(`
+      INSERT INTO delivery_tasks (
+        id, notification_id, user_id, channel, recipient,
+        title, message, severity, data, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `);
     
     const now = new Date().toISOString();
     for (const notification of pendingNotifications) {
       const taskId = uuidv4();
-      insertPushTask.run(
+      insertTask.run(
         taskId,
         notification.id,
         userId,
+        channel,
         token,
         notification.title,
         notification.message,
+        notification.severity,
         JSON.stringify({ notificationId: notification.id }),
         now,
         now

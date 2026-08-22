@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiSecurity } from '@/lib/infrastructure/security/api-security';
-import { getSystemDatabase } from '@/lib/infrastructure/database/connection';
+import { ContactDetailsService } from '@/lib/infrastructure/users/contact-details';
+import { isSeverity, resolveDeliveryTargets, SEVERITY_LEVELS } from '@/lib/delivery/routing-policy';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeSystem } from '@/lib/startup';
-import type { DeviceTokenRow } from '@/types/db-types';
 
 export async function POST(request: NextRequest) {
   await initializeSystem();
@@ -40,25 +40,29 @@ export async function POST(request: NextRequest) {
     }
     
     // Validate severity
-    const validSeverities = ['low', 'medium', 'high', 'critical'];
-    if (!validSeverities.includes(body.severity)) {
+    if (!isSeverity(body.severity)) {
       return NextResponse.json(
-        { error: 'Invalid severity. Must be: low, medium, high, or critical' },
+        { error: `Invalid severity. Must be: ${SEVERITY_LEVELS.join(', ')}` },
         { status: 400 }
       );
     }
     
-    // Get device tokens for user (optional - notification will be created regardless)
-    const db = getSystemDatabase();
-    const devices = db.prepare(`
-      SELECT token FROM device_tokens WHERE user_id = ?
-    `).all(keyData.userId) as Pick<DeviceTokenRow, 'token'>[];
-    db.close();
+    // Route by severity: apns to every registered device, plus call/sms for
+    // high & critical and email for medium & low (see lib/delivery/routing-policy.ts)
+    const contact = ContactDetailsService.getDeliveryContact(keyData.userId);
+    const { targets, skipped } = resolveDeliveryTargets(body.severity, contact);
+    
+    if (skipped.length > 0) {
+      console.warn(
+        `⚠️  ${body.severity} notification for user ${keyData.userId}: ` +
+        `no recipient configured for channel(s) ${skipped.join(', ')} — set a phone number in Settings`
+      );
+    }
     
     const commandBus = new CommandBus();
     const notificationId = uuidv4();
     
-    // Create notification and schedule push tasks (if devices exist)
+    // Create notification and schedule a delivery task per channel/recipient
     await commandBus.dispatch({
       userId: keyData.userId,
       aggregateId: notificationId,
@@ -69,13 +73,15 @@ export async function POST(request: NextRequest) {
         message: body.message,
         severity: body.severity,
         metadata: body.metadata,
-        deviceTokens: devices.map(d => d.token) // Will be empty array if no devices
+        deliveries: targets
       }
     });
     
     return NextResponse.json({
       success: true,
-      notificationId
+      notificationId,
+      channels: Array.from(new Set(targets.map(t => t.channel))),
+      skippedChannels: skipped
     });
   } catch (error) {
     console.error('Push notification error:', error);

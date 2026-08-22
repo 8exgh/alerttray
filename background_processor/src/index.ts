@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
-import { ApiClient } from './api-client';
-import { PushSender } from './push-sender';
+import { ApiClient, type DeliveryTask } from './api-client';
+import { DeliveryDispatcher, mask } from './delivery-dispatcher';
 
 dotenv.config();
 
@@ -13,11 +13,13 @@ function assert(condition: any, message: string): asserts condition {
 class BackgroundProcessor {
   private checkInterval = 5000; // Check every 5 seconds
   private apiClient: ApiClient;
-  private pushSender: PushSender;
+  private dispatcher: DeliveryDispatcher;
+  /** Tasks currently being delivered (a voice call can take minutes). */
+  private inFlight = new Set<string>();
   
   constructor() {
     this.apiClient = new ApiClient();
-    this.pushSender = new PushSender();
+    this.dispatcher = new DeliveryDispatcher();
   }
   
   async start(): Promise<void> {
@@ -26,7 +28,8 @@ class BackgroundProcessor {
     console.log(`  - Check interval: ${this.checkInterval}ms`);
     console.log(`  - Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`  - API_KEY present: ${process.env.API_KEY ? 'Yes' : 'No'}`);
-    console.log(`  - BACKGROUND_PROCESSOR_API_KEY present: ${process.env.BACKGROUND_PROCESSOR_API_KEY ? 'Yes' : 'No'}`);
+    console.log(`  - Phone gateway: ${process.env.PHONE_GATEWAY_URL || 'https://phone-gateway.fusenv.com'} (key: ${process.env.PHONE_GATEWAY_API_KEY ? 'Yes' : 'No'})`);
+    console.log(`  - Email (GMAIL_USER): ${process.env.GMAIL_USER ? 'Yes' : 'No'}`);
     
     let iterationCount = 0;
     
@@ -34,9 +37,21 @@ class BackgroundProcessor {
       try {
         iterationCount++;
         if (iterationCount % 12 === 1) { // Log every minute (5s * 12 = 60s)
-          console.log(`⏰ Processing cycle #${iterationCount} at ${new Date().toISOString()}`);
+          console.log(`⏰ Processing cycle #${iterationCount} at ${new Date().toISOString()} (${this.inFlight.size} in flight)`);
         }
-        await this.processPendingTasks();
+        // Claim the next batch and deliver it without blocking the poll loop:
+        // a phone call can take minutes and must not hold up SMS/email for
+        // other notifications. The server hands each task out exactly once,
+        // so overlapping batches never double-send.
+        const tasks = await this.apiClient.getPendingTasks();
+        if (tasks.length > 0) {
+          console.log(`Processing ${tasks.length} delivery task(s)...`);
+          for (const task of tasks) {
+            this.processTask(task).catch(error =>
+              console.error(`❌ Unhandled error delivering task ${task.id}:`, error)
+            );
+          }
+        }
       } catch (error) {
         console.error('❌ Error in processing loop:', error);
       }
@@ -45,55 +60,37 @@ class BackgroundProcessor {
     }
   }
   
-  private async processPendingTasks(): Promise<void> {
-    const tasks = await this.apiClient.getPendingTasks();
-    
-    if (tasks.length === 0) {
-      return;
-    }
-    
-    console.log(`Processing ${tasks.length} push tasks...`);
-    
-    const promises = tasks.map(task => this.processTask(task));
-    const results = await Promise.allSettled(promises);
-    
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
-    
-    if (failed > 0) {
-      console.log(`Completed ${successful} pushes, ${failed} failed`);
-    }
-  }
-  
-  private async processTask(task: any): Promise<void> {
+  private async processTask(task: DeliveryTask): Promise<void> {
     assert(task.id, "Task ID required");
-    assert(task.deviceToken, "Device token required");
+    assert(task.channel, "Channel required");
+    assert(task.recipient, "Recipient required");
     assert(task.notificationId, "Notification ID required");
     
+    const label = `[${task.channel}] ${task.notificationId} → ${mask(task.recipient)}`;
+    this.inFlight.add(task.id);
+    
     try {
-      await this.pushSender.sendNotification({
-        deviceToken: task.deviceToken,
-        title: task.title,
-        message: task.message,
-        data: task.data || {}
-      });
+      const outcome = await this.dispatcher.dispatch(task);
       
-      console.log(`Push sent: ${task.notificationId} to ${task.deviceToken.substring(0, 8)}...`);
+      console.log(`✅ Delivered ${label}${outcome.providerMessageId ? ` (${outcome.providerMessageId})` : ''}`);
       
-      await this.apiClient.reportPushResult({
+      await this.apiClient.reportResult({
         taskId: task.id,
         notificationId: task.notificationId,
-        success: true
+        success: true,
+        providerMessageId: outcome.providerMessageId
       });
     } catch (error: any) {
-      console.error(`Push failed: ${task.notificationId}`, error.message);
+      console.error(`❌ Failed ${label}:`, error.message);
       
-      await this.apiClient.reportPushResult({
+      await this.apiClient.reportResult({
         taskId: task.id,
         notificationId: task.notificationId,
         success: false,
         errorMessage: error.message
       });
+    } finally {
+      this.inFlight.delete(task.id);
     }
   }
   

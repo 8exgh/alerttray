@@ -4,6 +4,10 @@ import { CommandBus } from '@/lib/cqrs/command-bus';
 import { QueryBus } from '@/lib/cqrs/query-bus';
 import { initializeSystem } from '@/lib/startup';
 
+/**
+ * Background processor reports the outcome of a delivery task (any channel).
+ * Body: { taskId, notificationId, success, errorMessage?, providerMessageId? }
+ */
 export async function POST(request: NextRequest) {
   await initializeSystem();
   
@@ -20,7 +24,7 @@ export async function POST(request: NextRequest) {
       }
       
       const body = JSON.parse(bodyText);
-      const { taskId, notificationId, success, errorMessage } = body;
+      const { taskId, notificationId, success, errorMessage, providerMessageId } = body;
       
       if (!taskId || !notificationId || typeof success !== 'boolean') {
         return createInternalResponse({
@@ -30,7 +34,7 @@ export async function POST(request: NextRequest) {
       
       // Get task details from read model
       const queryBus = new QueryBus();
-      const task = await queryBus.getPushTaskById(taskId);
+      const task = await queryBus.getDeliveryTaskById(taskId);
       
       if (!task) {
         return createInternalResponse({ error: 'Task not found' });
@@ -40,12 +44,14 @@ export async function POST(request: NextRequest) {
       
       await commandBus.dispatch({
         userId: task.userId,
-        aggregateId: notificationId,
-        type: success ? 'CompletePushTask' : 'FailPushTask',
+        aggregateId: taskId,
+        type: success ? 'CompleteDeliveryTask' : 'FailDeliveryTask',
         payload: {
           taskId,
           notificationId,
-          errorMessage
+          channel: task.channel,
+          errorMessage,
+          providerMessageId
         }
       });
       
