@@ -127,3 +127,55 @@ export function normalizePhoneNumber(input: string): string | null {
 export function isValidEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
 }
+
+export interface RecipientOverrides {
+  phoneNumber: string | null;
+  notificationEmail: string | null;
+}
+
+/**
+ * Validate the optional `recipients` object of a push request.
+ *
+ * Integrations that alert on behalf of their own users (e.g. StatusNest
+ * calling a site's owner) pass the person to reach here. When present it
+ * REPLACES the account holder's phone number and alert email for that one
+ * notification — an absent or blank field means "no recipient for that
+ * channel", it does not fall back to the account holder. Registered device
+ * tokens are unaffected, so the account holder's iPhones still get the push.
+ *
+ * Returns `{ error }` for malformed input.
+ */
+export function parseRecipientOverrides(input: unknown): RecipientOverrides | { error: string } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return { error: 'recipients must be an object with optional phoneNumber and email' };
+  }
+  const { phoneNumber, email } = input as Record<string, unknown>;
+
+  let normalizedPhone: string | null = null;
+  if (phoneNumber !== undefined && phoneNumber !== null) {
+    if (typeof phoneNumber !== 'string') {
+      return { error: 'recipients.phoneNumber must be a string' };
+    }
+    if (phoneNumber.trim() !== '') {
+      normalizedPhone = normalizePhoneNumber(phoneNumber);
+      if (!normalizedPhone) {
+        return { error: 'recipients.phoneNumber must be in international E.164 format, e.g. +14155552671' };
+      }
+    }
+  }
+
+  let normalizedEmail: string | null = null;
+  if (email !== undefined && email !== null) {
+    if (typeof email !== 'string') {
+      return { error: 'recipients.email must be a string' };
+    }
+    if (email.trim() !== '') {
+      normalizedEmail = email.trim();
+      if (!isValidEmail(normalizedEmail)) {
+        return { error: 'recipients.email is not a valid email address' };
+      }
+    }
+  }
+
+  return { phoneNumber: normalizedPhone, notificationEmail: normalizedEmail };
+}

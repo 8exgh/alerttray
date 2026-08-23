@@ -69,6 +69,7 @@ Defined in one place: `nextjs_alerttray/lib/delivery/routing-policy.ts` (`SEVERI
 - `medium`, `low` → APNS push + **email**.
 - If a routed channel has no recipient configured (e.g. no phone number), it is skipped and `FALLBACK_CHANNEL` (`email`) is used instead. The push API response reports `channels` and `skippedChannels`.
 - Users set their phone number / alert email on `/settings` (`GET|PUT /api/contact`). Phone numbers are stored in E.164.
+- A push request may carry `recipients: { phoneNumber?, email? }` (validated by `parseRecipientOverrides`). When present it replaces the account holder's phone/email for that notification only — blank means "no recipient for that channel", never a fallback to the account holder. Device tokens are unaffected. Used by integrations that alert on behalf of their own users (StatusNest → site owner).
 
 ### Notification Delivery Flow
 1. External system calls `/api/notifications/push` with API key

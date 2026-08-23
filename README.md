@@ -96,6 +96,26 @@ curl -X POST http://localhost:3000/api/notifications/push \
 
 Response: `{ "success": true, "notificationId": "...", "channels": ["call","sms"], "skippedChannels": [] }` — `skippedChannels` lists channels the policy wanted but the user has no recipient for (e.g. no phone number).
 
+### Alerting someone other than the account holder
+
+An integration that alerts on behalf of *its* users (StatusNest calling a site's owner, for example) can pass
+the person to reach in the request. When `recipients` is present it **replaces** the account holder's phone
+number and alert email for that notification — a missing or blank field means that channel has no recipient
+(it does not fall back to the account holder). Registered iPhones still receive the push.
+
+```bash
+curl -X POST http://localhost:3000/api/notifications/push \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "purposeId": "statusnest-domain-offline",
+    "title": "example.com is offline",
+    "message": "StatusNest could not reach example.com. The server responded with HTTP 503.",
+    "severity": "critical",
+    "recipients": { "phoneNumber": "+14155552671", "email": "owner@example.com" }
+  }'
+```
+
 ### Delivery by severity
 
 | Severity | Channels |

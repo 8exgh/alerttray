@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiSecurity } from '@/lib/infrastructure/security/api-security';
 import { ContactDetailsService } from '@/lib/infrastructure/users/contact-details';
-import { isSeverity, resolveDeliveryTargets, SEVERITY_LEVELS } from '@/lib/delivery/routing-policy';
+import { isSeverity, parseRecipientOverrides, resolveDeliveryTargets, SEVERITY_LEVELS } from '@/lib/delivery/routing-policy';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeSystem } from '@/lib/startup';
@@ -49,13 +49,30 @@ export async function POST(request: NextRequest) {
     
     // Route by severity: apns to every registered device, plus call/sms for
     // high & critical and email for medium & low (see lib/delivery/routing-policy.ts)
-    const contact = ContactDetailsService.getDeliveryContact(keyData.userId);
+    let contact = ContactDetailsService.getDeliveryContact(keyData.userId);
+    
+    // Optional per-notification recipients: an integration alerting on behalf
+    // of its own user (e.g. StatusNest calling a site owner) passes who to
+    // reach, and the account holder's phone/email are not used for this one.
+    if (body.recipients !== undefined) {
+      const overrides = parseRecipientOverrides(body.recipients);
+      if ('error' in overrides) {
+        return NextResponse.json({ error: overrides.error }, { status: 400 });
+      }
+      contact = {
+        ...contact,
+        phoneNumber: overrides.phoneNumber,
+        notificationEmail: overrides.notificationEmail
+      };
+    }
+    
     const { targets, skipped } = resolveDeliveryTargets(body.severity, contact);
     
     if (skipped.length > 0) {
       console.warn(
         `⚠️  ${body.severity} notification for user ${keyData.userId}: ` +
-        `no recipient configured for channel(s) ${skipped.join(', ')} — set a phone number in Settings`
+        `no recipient configured for channel(s) ${skipped.join(', ')}` +
+        (body.recipients !== undefined ? ' (request-supplied recipients)' : ' — set a phone number in Settings')
       );
     }
     
