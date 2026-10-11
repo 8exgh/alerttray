@@ -25,6 +25,22 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
   
+  /**
+   * `REGISTRATION=first-user` closes self-service sign-up once one account
+   * exists. A private AlertTray copy has a single owner; an open one would let
+   * anyone register, mint an API key and place calls/SMS on our Twilio number.
+   */
+  static registrationOpen(): boolean {
+    if (process.env.REGISTRATION !== 'first-user') return true;
+    const db = getSystemDatabase();
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number };
+      return row.count === 0;
+    } finally {
+      db.close();
+    }
+  }
+  
   static async createUser(email: string, password: string): Promise<User> {
     const db = getSystemDatabase();
     
