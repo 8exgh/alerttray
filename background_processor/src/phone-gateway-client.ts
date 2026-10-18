@@ -27,6 +27,8 @@ export interface CallResult {
   /** Final status after polling, or 'running' if we stopped waiting. */
   status: 'running' | 'ended' | 'failed';
   reason?: string;
+  /** Errors the gateway recorded during the call (e.g. `tts_failed: …`). */
+  errors: string[];
 }
 
 interface OrchestrationRecord {
@@ -113,7 +115,8 @@ export class PhoneGatewayClient {
       to: started.to,
       from: started.from,
       status: last.status,
-      reason: last.reason ?? last.errors?.[0]
+      reason: last.reason ?? last.errors?.[0],
+      errors: last.errors ?? []
     };
   }
   

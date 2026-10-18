@@ -104,6 +104,13 @@ export class DeliveryDispatcher {
     if (result.status === 'failed') {
       throw new Error(`call ${result.orchestrationId} failed: ${result.reason ?? 'unknown reason'}`);
     }
+    // Gateways before 2026-10 report a call whose speech synthesis failed as a
+    // normal 'ended' call: the callee picked up and heard silence (OpenAI 429
+    // spend limit, 2026-10-11..18). The alert was not delivered.
+    const speechError = result.errors.find(e => e.startsWith('tts_failed'));
+    if (speechError) {
+      throw new Error(`call ${result.orchestrationId} connected but nothing was spoken: ${speechError}`);
+    }
     return { providerMessageId: result.orchestrationId };
   }
   
