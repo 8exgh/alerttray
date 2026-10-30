@@ -20,13 +20,8 @@ export class ApiSecurity {
     const db = getSystemDatabase();
     
     try {
-      // Revoke existing active keys
-      db.prepare(`
-        UPDATE api_keys 
-        SET revoked_at = ? 
-        WHERE user_id = ? AND revoked_at IS NULL
-      `).run(new Date().toISOString(), userId);
-      
+      // A user may hold several active keys at once (one per integration);
+      // keys are only revoked explicitly via revokeApiKey.
       const { key, hash } = this.generateApiKey();
       const apiKeyId = uuidv4();
       const now = new Date().toISOString();
@@ -67,12 +62,31 @@ export class ApiSecurity {
     }
   }
   
-  static async revokeApiKey(apiKeyId: string): Promise<void> {
+  /** Revoke one of the user's active keys. False if no such active key belongs to them. */
+  static async revokeApiKey(userId: string, apiKeyId: string): Promise<boolean> {
     const db = getSystemDatabase();
     
     try {
-      db.prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ?')
-        .run(new Date().toISOString(), apiKeyId);
+      const result = db.prepare(`
+        UPDATE api_keys SET revoked_at = ?
+        WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+      `).run(new Date().toISOString(), apiKeyId, userId);
+      return result.changes > 0;
+    } finally {
+      db.close();
+    }
+  }
+  
+  /** Re-enable one of the user's revoked keys; the original secret works again. False if no such revoked key belongs to them. */
+  static async reactivateApiKey(userId: string, apiKeyId: string): Promise<boolean> {
+    const db = getSystemDatabase();
+    
+    try {
+      const result = db.prepare(`
+        UPDATE api_keys SET revoked_at = NULL
+        WHERE id = ? AND user_id = ? AND revoked_at IS NOT NULL
+      `).run(apiKeyId, userId);
+      return result.changes > 0;
     } finally {
       db.close();
     }

@@ -61,7 +61,7 @@ npm run build
 - Public API uses API keys with format: `atk_{32_random_hex_chars}`
 - Internal APIs use HMAC signatures for authentication
 - API keys are SHA-256 hashed before storage
-- One active API key per user (auto-revokes previous)
+- A user may hold several active API keys; keys are revoked and re-enabled explicitly (`POST /api/api-keys/revoke|reactivate`, owner-scoped). Re-enabling makes the original secret valid again. (Before 2026-10-30, creating a key auto-revoked the user's other keys.)
 
 ### Severity → Channel Routing
 Defined in one place: `nextjs_alerttray/lib/delivery/routing-policy.ts` (`SEVERITY_CHANNEL_POLICY`).

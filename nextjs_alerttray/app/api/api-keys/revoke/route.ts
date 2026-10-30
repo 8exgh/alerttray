@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthService } from '@/lib/infrastructure/security/auth';
+import { validateRequest } from '@/lib/infrastructure/security/auth-middleware';
 import { ApiSecurity } from '@/lib/infrastructure/security/api-security';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { initializeSystem } from '@/lib/startup';
@@ -8,20 +8,11 @@ export async function POST(request: NextRequest) {
   await initializeSystem();
   
   try {
-    const sessionToken = request.cookies.get('session')?.value;
-    
-    if (!sessionToken) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-    
-    const sessionData = await AuthService.validateSession(sessionToken);
+    const sessionData = await validateRequest(request);
     
     if (!sessionData) {
       return NextResponse.json(
-        { error: 'Invalid session' },
+        { error: 'Authentication required' },
         { status: 401 }
       );
     }
@@ -29,15 +20,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { apiKeyId } = body;
     
-    if (!apiKeyId) {
+    if (!apiKeyId || typeof apiKeyId !== 'string') {
       return NextResponse.json(
         { error: 'API key ID is required' },
         { status: 400 }
       );
     }
     
-    // Revoke API key
-    await ApiSecurity.revokeApiKey(apiKeyId);
+    // Only the owner's own active keys can be revoked
+    const revoked = await ApiSecurity.revokeApiKey(sessionData.user.id, apiKeyId);
+    if (!revoked) {
+      return NextResponse.json(
+        { error: 'No active API key with that ID' },
+        { status: 404 }
+      );
+    }
     
     // Record event
     const commandBus = new CommandBus();

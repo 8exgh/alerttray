@@ -133,6 +133,12 @@ export interface ApiKeyRevokedEvent {
   timestamp: Date;
 }
 
+export interface ApiKeyReactivatedEvent {
+  apiKeyId: string;
+  userId: string;
+  timestamp: Date;
+}
+
 export interface DeviceRegisteredEvent {
   deviceId: string;
   userId: string;

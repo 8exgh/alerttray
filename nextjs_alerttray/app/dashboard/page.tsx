@@ -80,6 +80,24 @@ export default function DashboardPage() {
     }
   };
 
+  const handleReactivateKey = async (keyId: string) => {
+    if (!confirm('Re-enable this API key? Anything still holding the original key will be able to send alerts again.')) return;
+
+    try {
+      const response = await fetch('/api/api-keys/reactivate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKeyId: keyId }),
+      });
+
+      if (response.ok) {
+        fetchApiKeys();
+      }
+    } catch (error) {
+      console.error('Error re-enabling API key:', error);
+    }
+  };
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
@@ -254,12 +272,19 @@ export default function DashboardPage() {
                                 : 'Never'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              {key.active && (
+                              {key.active ? (
                                 <button
                                   onClick={() => handleRevokeKey(key.id)}
                                   className="text-red-600 hover:text-red-900"
                                 >
                                   Revoke
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleReactivateKey(key.id)}
+                                  className="text-green-700 hover:text-green-900"
+                                >
+                                  Re-enable
                                 </button>
                               )}
                             </td>

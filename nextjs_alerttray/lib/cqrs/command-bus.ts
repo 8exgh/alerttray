@@ -41,6 +41,8 @@ export class CommandBus {
         return this.handleCreateApiKey(command);
       case 'RevokeApiKey':
         return this.handleRevokeApiKey(command);
+      case 'ReactivateApiKey':
+        return this.handleReactivateApiKey(command);
       case 'RegisterDevice':
         return this.handleRegisterDevice(command);
       case 'UnregisterDevice':
@@ -260,6 +262,25 @@ export class CommandBus {
       aggregateId: apiKeyId,
       aggregateType: 'ApiKey',
       eventType: 'ApiKeyRevokedEvent',
+      eventVersion: 1,
+      eventData: {
+        apiKeyId,
+        userId: command.userId,
+        timestamp: now
+      },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+  }
+  
+  private handleReactivateApiKey(command: Command): Event[] {
+    const { apiKeyId } = command.payload;
+    const now = new Date();
+    
+    return [{
+      aggregateId: apiKeyId,
+      aggregateType: 'ApiKey',
+      eventType: 'ApiKeyReactivatedEvent',
       eventVersion: 1,
       eventData: {
         apiKeyId,
