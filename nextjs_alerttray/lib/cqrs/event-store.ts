@@ -32,6 +32,13 @@ export class EventStore {
       let nextSequence = (result.max_seq || 0) + 1;
       
       for (const event of events) {
+        // Retried inbound reports must be idempotent even before projection,
+        // or when two worker instances observe the same mailbox report.
+        const idempotencyKey = event.metadata?.idempotencyKey;
+        if (idempotencyKey && db.prepare(`
+          SELECT id FROM events WHERE aggregate_id = ?
+            AND json_extract(metadata, '$.idempotencyKey') = ? LIMIT 1
+        `).get(event.aggregateId, idempotencyKey)) continue;
         insert.run(
           event.aggregateId,
           event.aggregateType,

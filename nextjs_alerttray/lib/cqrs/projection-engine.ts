@@ -2,7 +2,7 @@ import { Event } from '@/types';
 import { EventStore } from './event-store';
 import { getReadModelDatabase, getAllUserIds } from '@/lib/infrastructure/database/connection';
 import { v4 as uuidv4 } from 'uuid';
-import type { NotificationRow, CountResult } from '@/types/db-types';
+import type { NotificationRow } from '@/types/db-types';
 import type { Channel } from '@/lib/delivery/routing-policy';
 import type Database from 'better-sqlite3';
 
@@ -98,6 +98,9 @@ export class ProjectionEngine {
       case 'DeliveryTaskFailedEvent':
         this.projectDeliveryTaskFailed(db, event);
         break;
+      case 'EmailDeliveryBouncedEvent':
+        this.projectEmailDeliveryBounced(db, event);
+        break;
       // Legacy APNS-only events (streams written before multi-channel delivery)
       case 'PushTaskScheduledEvent':
         this.projectDeliveryTaskScheduled(db, {
@@ -179,30 +182,18 @@ export class ProjectionEngine {
   }
   
   private projectDeliveryTaskCompleted(db: Database.Database, event: Event): void {
-    const { taskId, notificationId, deliveredAt } = event.eventData;
+    const { taskId, notificationId, deliveredAt, providerMessageId } = event.eventData;
     
     const updateTask = db.prepare(`
       UPDATE delivery_tasks 
-      SET status = 'completed', completed_at = ?, updated_at = ?
-      WHERE id = ?
+      SET status = 'completed', completed_at = ?, updated_at = ?,
+          provider_message_id = COALESCE(?, provider_message_id)
+      WHERE id = ? AND bounced_at IS NULL
     `);
     
     const now = new Date().toISOString();
-    updateTask.run(deliveredAt, now, taskId);
-    
-    // Notification is delivered once nothing is still pending or in flight
-    const outstanding = db.prepare(
-      "SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ? AND status IN ('pending', 'processing')"
-    ).get(notificationId) as CountResult;
-    
-    if (outstanding.count === 0) {
-      const updateNotification = db.prepare(`
-        UPDATE notifications 
-        SET status = 'delivered', delivered_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'pending'
-      `);
-      updateNotification.run(deliveredAt, now, notificationId);
-    }
+    updateTask.run(deliveredAt, now, providerMessageId ?? null, taskId);
+    this.updateNotificationDeliveryStatus(db, notificationId, now);
   }
   
   private projectDeliveryTaskFailed(db: Database.Database, event: Event): void {
@@ -211,29 +202,42 @@ export class ProjectionEngine {
     const updateTask = db.prepare(`
       UPDATE delivery_tasks 
       SET status = 'failed', error_message = ?, updated_at = ?, attempts = attempts + 1
-      WHERE id = ?
+      WHERE id = ? AND bounced_at IS NULL AND status != 'failed'
     `);
     
     const now = new Date().toISOString();
     updateTask.run(errorMessage, now, taskId);
     
-    // Notification only fails when every channel has failed
-    const failedTasks = db.prepare(
-      'SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ? AND status = ?'
-    ).get(notificationId, 'failed') as CountResult;
-    
-    const totalTasks = db.prepare(
-      'SELECT COUNT(*) as count FROM delivery_tasks WHERE notification_id = ?'
-    ).get(notificationId) as CountResult;
-    
-    if (failedTasks.count === totalTasks.count) {
-      const updateNotification = db.prepare(`
-        UPDATE notifications 
-        SET status = 'failed', updated_at = ?
-        WHERE id = ? AND status = 'pending'
-      `);
-      updateNotification.run(now, notificationId);
-    }
+    this.updateNotificationDeliveryStatus(db, notificationId, now);
+  }
+
+  private projectEmailDeliveryBounced(db: Database.Database, event: Event): void {
+    const { taskId, notificationId, originalMessageId, status, diagnostic, bouncedAt } = event.eventData;
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE delivery_tasks SET status = 'failed', bounced_at = ?, completed_at = NULL,
+        error_message = ?, updated_at = ?
+      WHERE id = ? AND channel = 'email' AND provider_message_id = ? AND bounced_at IS NULL
+    `).run(bouncedAt, `Email bounced (${status}): ${diagnostic}`, now, taskId, originalMessageId);
+    this.updateNotificationDeliveryStatus(db, notificationId, now);
+  }
+
+  private updateNotificationDeliveryStatus(db: Database.Database, notificationId: string, now: string): void {
+    const counts = db.prepare(`
+      SELECT COUNT(*) AS total,
+        SUM(status IN ('pending', 'processing')) AS outstanding,
+        SUM(status = 'completed') AS completed
+      FROM delivery_tasks WHERE notification_id = ?
+    `).get(notificationId) as { total: number; outstanding: number; completed: number };
+    if (!counts.total || counts.outstanding) return;
+    // A late bounce can overturn SMTP acceptance. Other successful channels
+    // still count, and a user's explicit read state must never be undone.
+    db.prepare(`
+      UPDATE notifications SET status = ?,
+        delivered_at = CASE WHEN ? THEN COALESCE(delivered_at, ?) ELSE NULL END,
+        updated_at = ?
+      WHERE id = ? AND status != 'read'
+    `).run(counts.completed ? 'delivered' : 'failed', counts.completed, now, now, notificationId);
   }
   
   private projectNotificationRead(db: Database.Database, event: Event): void {

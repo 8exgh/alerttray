@@ -29,6 +29,8 @@ export class CommandBus {
         return this.handleCompleteDeliveryTask(command);
       case 'FailDeliveryTask':
         return this.handleFailDeliveryTask(command);
+      case 'RecordEmailBounce':
+        return this.handleRecordEmailBounce(command);
       case 'UpdateContactDetails':
         return this.handleUpdateContactDetails(command);
       case 'MarkNotificationRead':
@@ -131,7 +133,7 @@ export class CommandBus {
   }
   
   private handleFailDeliveryTask(command: Command): Event[] {
-    const { taskId, notificationId, channel, errorMessage } = command.payload;
+    const { taskId, notificationId, channel, errorMessage, emailFailure } = command.payload;
     const now = new Date();
     
     return [{
@@ -144,6 +146,7 @@ export class CommandBus {
         notificationId,
         channel,
         errorMessage,
+        emailFailure,
         timestamp: now
       },
       createdAt: now,
@@ -151,6 +154,22 @@ export class CommandBus {
     }];
   }
   
+  private handleRecordEmailBounce(command: Command): Event[] {
+    const { taskId, notificationId, originalMessageId, recipient, status, diagnostic } = command.payload;
+    assert(taskId && notificationId && originalMessageId, 'Email bounce requires a matched delivery');
+    const now = new Date();
+    return [{
+      aggregateId: taskId,
+      aggregateType: 'DeliveryTask',
+      eventType: 'EmailDeliveryBouncedEvent',
+      eventVersion: 1,
+      eventData: { taskId, notificationId, originalMessageId, recipient, status, diagnostic, bouncedAt: now },
+      metadata: { idempotencyKey: `email-bounce:${taskId}` },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+  }
+
   private handleUpdateContactDetails(command: Command): Event[] {
     const { phoneNumber = null, notificationEmail = null } = command.payload;
     const now = new Date();

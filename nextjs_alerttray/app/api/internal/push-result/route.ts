@@ -1,12 +1,14 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { withInternalAuth, createInternalResponse, verifySignature } from '@/lib/infrastructure/security/api-security';
 import { CommandBus } from '@/lib/cqrs/command-bus';
 import { QueryBus } from '@/lib/cqrs/query-bus';
 import { initializeSystem } from '@/lib/startup';
+import { parseEmailRecipientFailure } from '@/lib/delivery/email-failure-policy';
+import { suppressEmailAfterFailure } from '@/lib/delivery/email-suppressions';
 
 /**
  * Background processor reports the outcome of a delivery task (any channel).
- * Body: { taskId, notificationId, success, errorMessage?, providerMessageId? }
+ * Body: { taskId, notificationId, success, errorMessage?, providerMessageId?, emailFailure? }
  */
 export async function POST(request: NextRequest) {
   await initializeSystem();
@@ -24,7 +26,7 @@ export async function POST(request: NextRequest) {
       }
       
       const body = JSON.parse(bodyText);
-      const { taskId, notificationId, success, errorMessage, providerMessageId } = body;
+      const { taskId, notificationId, success, errorMessage, providerMessageId, emailFailure } = body;
       
       if (!taskId || !notificationId || typeof success !== 'boolean') {
         return createInternalResponse({
@@ -36,9 +38,16 @@ export async function POST(request: NextRequest) {
       const queryBus = new QueryBus();
       const task = await queryBus.getDeliveryTaskById(taskId);
       
-      if (!task) {
+      if (!task || task.notificationId !== notificationId) {
         return createInternalResponse({ error: 'Task not found' });
       }
+
+      const recipientFailure = emailFailure === undefined ? undefined : parseEmailRecipientFailure(emailFailure);
+      if (emailFailure !== undefined && (!recipientFailure || success || task.channel !== 'email' ||
+          recipientFailure.recipient !== task.recipient.trim().toLowerCase())) {
+        return NextResponse.json({ error: 'Invalid email recipient failure' }, { status: 400 });
+      }
+      if (recipientFailure) suppressEmailAfterFailure(recipientFailure, task.id);
       
       const commandBus = new CommandBus();
       
@@ -51,7 +60,8 @@ export async function POST(request: NextRequest) {
           notificationId,
           channel: task.channel,
           errorMessage,
-          providerMessageId
+          providerMessageId,
+          emailFailure: recipientFailure
         }
       });
       

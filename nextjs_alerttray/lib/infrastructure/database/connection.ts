@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import type { LegacyPushTaskRow } from '@/types/db-types';
+import { isPermanentRecipientFailure } from '@/lib/delivery/email-failure-policy';
 
 const DATABASE_PATH = process.env.DATABASE_PATH || './data';
 
@@ -118,8 +119,49 @@ export function getSystemDatabase(): Database.Database {
   // Migrations for databases created before contact details existed.
   ensureColumn(db, 'users', 'phone_number', 'TEXT');
   ensureColumn(db, 'users', 'notification_email', 'TEXT');
+  if (!tableExists(db, 'email_suppressions')) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS email_suppressions (
+          recipient TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          diagnostic TEXT NOT NULL,
+          source_task_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      backfillEmailSuppressions(db);
+    })();
+  }
   
   return db;
+}
+
+/** Previously processed bounces may already be behind the worker's IMAP cursor. */
+function backfillEmailSuppressions(db: Database.Database): void {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO email_suppressions (recipient, status, diagnostic, source_task_id, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  for (const userId of getAllUserIds()) {
+    const filename = path.join(DATABASE_PATH, 'users', userId, 'write.db');
+    if (!fs.existsSync(filename)) continue;
+    const events = new Database(filename, { readonly: true });
+    try {
+      const rows = events.prepare(`
+        SELECT aggregate_id, event_type, event_data, created_at FROM events
+        WHERE event_type IN ('EmailDeliveryBouncedEvent', 'DeliveryTaskFailedEvent')
+        ORDER BY sequence_number
+      `).iterate() as Iterable<{ aggregate_id: string; event_type: string; event_data: string; created_at: string }>;
+      for (const row of rows) {
+        const data = JSON.parse(row.event_data);
+        const failure = row.event_type === 'EmailDeliveryBouncedEvent' ? data : data.emailFailure;
+        if (failure && typeof failure.recipient === 'string' && isPermanentRecipientFailure(failure.status)) {
+          insert.run(failure.recipient.trim().toLowerCase(), failure.status, failure.diagnostic, row.aggregate_id, row.created_at);
+        }
+      }
+    } finally { events.close(); }
+  }
 }
 
 export function getReadModelDatabase(): Database.Database {
@@ -194,8 +236,37 @@ export function getReadModelDatabase(): Database.Database {
   `);
 
   migrateLegacyPushTasks(db);
+  db.transaction(() => {
+    const backfillMessageIds = !columnExists(db, 'delivery_tasks', 'provider_message_id');
+    ensureColumn(db, 'delivery_tasks', 'provider_message_id', 'TEXT');
+    ensureColumn(db, 'delivery_tasks', 'bounced_at', 'TIMESTAMP');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_delivery_provider_message ON delivery_tasks(provider_message_id)');
+    if (backfillMessageIds) backfillEmailMessageIds(db);
+  })();
   
   return db;
+}
+
+/** SMTP IDs were already saved in completion events before bounce monitoring. */
+function backfillEmailMessageIds(db: Database.Database): void {
+  const update = db.prepare('UPDATE delivery_tasks SET provider_message_id = ? WHERE id = ? AND channel = ?');
+  for (const userId of getAllUserIds()) {
+    const filename = path.join(DATABASE_PATH, 'users', userId, 'write.db');
+    if (!fs.existsSync(filename)) continue;
+    const events = new Database(filename, { readonly: true });
+    try {
+      const rows = events.prepare(`
+        SELECT aggregate_id, json_extract(event_data, '$.providerMessageId') AS message_id
+        FROM events WHERE event_type = 'DeliveryTaskCompletedEvent'
+          AND json_extract(event_data, '$.channel') = 'email'
+          AND json_extract(event_data, '$.providerMessageId') IS NOT NULL
+        ORDER BY sequence_number
+      `).all() as { aggregate_id: string; message_id: string }[];
+      db.transaction(() => {
+        for (const row of rows) update.run(row.message_id, row.aggregate_id, 'email');
+      })();
+    } finally { events.close(); }
+  }
 }
 
 /**

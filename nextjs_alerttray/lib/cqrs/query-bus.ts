@@ -100,6 +100,17 @@ export class QueryBus {
     
     return row ? this.mapDeliveryTask(row) : null;
   }
+
+  async getEmailTaskByMessageId(messageId: string, recipient: string): Promise<DeliveryTask | null> {
+    const db = getReadModelDatabase();
+    try {
+      const row = db.prepare(`
+        SELECT * FROM delivery_tasks WHERE channel = 'email'
+          AND provider_message_id = ? AND lower(trim(recipient)) = ?
+      `).get(messageId, recipient.trim().toLowerCase()) as DeliveryTaskRow | undefined;
+      return row ? this.mapDeliveryTask(row) : null;
+    } finally { db.close(); }
+  }
   
   async getDeliveryTasksForNotification(notificationId: string): Promise<DeliveryTask[]> {
     const db = getReadModelDatabase();
