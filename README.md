@@ -11,7 +11,7 @@ AlertTray is a notification management service built with CQRS (Command Query Re
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - Xcode (for iOS app)
 - Apple Developer account (for APNS)
 
@@ -133,6 +133,81 @@ In production, alerts come from AlertTray's own gateway client (`alerttray`) and
 save it as a contact so critical calls can bypass Do Not Disturb / Focus. The client's `pgw_` key lives in
 the devops repo secret `ALERTTRAY_PHONE_GATEWAY_API_KEY` and can be re-read with the gateway admin key via
 `GET /clients`.
+
+### Email delivery failure checks (operators)
+
+The background processor checks the sending mailbox for permanent delivery failure notices every minute.
+For Gmail SMTP, it reuses `GMAIL_USER` / `GMAIL_APP_PASSWORD` (or `SMTP_USER` / `SMTP_PASS`) over TLS IMAP.
+It opens Gmail's All Mail folder when available, otherwise INBOX, in **read-only** mode; it does not mark,
+move or delete messages. `DELIVERY_DRY_RUN=1` also disables mailbox access.
+
+Structured [RFC 3464 bounce reports](https://www.rfc-editor.org/rfc/rfc3464) are matched by the original SMTP Message-ID **and** recipient through the
+authenticated `/api/internal/email-bounces` endpoint. A confirmed bounce marks the email task failed
+and stores the SMTP diagnostic. A notification fails when all its delivery channels failed; successful
+push/SMS/call deliveries and the user's read state are preserved. Reports are idempotent, and late SMTP
+success reports cannot undo a recorded bounce.
+
+Confirmed permanent recipient failures automatically add the address to the private `email_suppressions`
+table in the system database. This covers missing/invalid destinations (`5.1.1`, `5.1.2`, `5.1.3`), moved
+mailboxes without forwarding (`5.1.6`), null MX destinations (`5.1.10`) and permanently disabled mailboxes
+(`5.2.1`), following the [enhanced status code registry](https://www.iana.org/assignments/smtp-enhanced-status-codes/).
+Immediate SMTP `RCPT TO` rejections with these enhanced codes also suppress the recipient. Full mailboxes,
+temporary failures, sender errors, generic `550` responses and content/policy failures do not automatically
+block future messages. They can still be blocked explicitly using the worker's operator-managed list.
+
+Every real email send checks the shared list through the authenticated
+`POST /api/internal/email-suppressions/check` endpoint before contacting SMTP, including already queued
+tasks. Blocks have no automatic expiry, survive restarts and apply across accounts and workers. The check
+returns only a boolean; no list or reason is exposed to clients. A failed check prevents SMTP delivery and
+fails the task. Messages already in flight when a block is recorded cannot be recalled.
+
+The first check scans the last 30 days. Existing SMTP IDs are recovered from completion events during
+the database migration. Previously recorded qualifying bounce/SMTP failures also populate the suppression
+table on its first creation, even when the mailbox cursor has passed those notices.
+Subsequent checks resume from `data/email-bounce-checkpoint.json`; keep the
+worker's data volume mounted. API/mailbox failures are retried without advancing past the failed report.
+Deploy the Next.js backend **before** the worker to activate this feature; mailbox authentication still needs to
+be verified in the deployed environment.
+
+Optional worker settings:
+
+```env
+# EMAIL_BOUNCE_MONITOR=0                 # disable monitoring
+# EMAIL_BOUNCE_IMAP_HOST=imap.example.com # required for custom SMTP providers
+# EMAIL_BOUNCE_IMAP_PORT=993             # TLS only
+# EMAIL_BOUNCE_IMAP_USER=bounces@example.com
+# EMAIL_BOUNCE_IMAP_PASSWORD=<mailbox-password>
+# EMAIL_BOUNCE_MAILBOX=INBOX             # override All Mail / INBOX selection
+# EMAIL_BOUNCE_RETURN_PATH=bounces@example.com
+# EMAIL_BOUNCE_CHECKPOINT_PATH=/app/data/email-bounce-checkpoint.json
+```
+
+Gmail sends use the authenticated account as the SMTP return path, even when `EMAIL_FROM` is an alias.
+For custom SMTP, configure the return path and monitored mailbox together. Messages accepted by SMTP
+remain provisionally delivered unless a matching permanent bounce arrives. Temporary delay notices,
+unstructured bounce emails, missing original message IDs, silently dropped mail and notices outside the
+selected folder cannot establish failure here. Reports over 2 MiB are skipped with a worker warning.
+An unmatched recent report is retried for ten minutes to allow completion events to project; older
+unmatched notices are ignored because the mailbox may be shared with other applications.
+
+Operators can inspect confirmed bounces directly in the read database:
+
+```sql
+SELECT recipient, error_message, bounced_at
+FROM delivery_tasks
+WHERE channel = 'email' AND bounced_at IS NOT NULL
+ORDER BY bounced_at DESC;
+```
+
+To inspect automatic blocks, query the **system** database (`data/system/system.db`):
+
+```sql
+SELECT recipient, status, diagnostic, source_task_id, created_at
+FROM email_suppressions ORDER BY created_at DESC;
+```
+
+An operator can remove a corrected address from that table to allow future sends. A new qualifying failure
+will block it again. The explicit worker list and `EMAIL_SUPPRESSION_LIST` are independent and still apply.
 
 ### Contact details API
 ```bash

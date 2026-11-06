@@ -142,3 +142,4 @@ vite.config.ts.timestamp-*
 
 
 data/certificates/AuthKey.p8
+data/email-bounce-checkpoint.json*

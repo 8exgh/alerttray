@@ -31,10 +31,10 @@ export class DeliveryDispatcher {
   private email: EmailClient;
   private dryRun: boolean;
   
-  constructor() {
+  constructor(checkEmailSuppression: (recipients: string[]) => Promise<boolean>) {
     this.pushSender = new PushSender();
     this.phoneGateway = new PhoneGatewayClient();
-    this.email = new EmailClient();
+    this.email = new EmailClient(checkEmailSuppression);
     this.dryRun = process.env.DELIVERY_DRY_RUN === '1';
     
     if (this.dryRun) console.log('🧪 DELIVERY_DRY_RUN=1 — nothing will actually be sent');

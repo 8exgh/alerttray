@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { emailRecipients, isEmailSuppressed } from './email-suppression';
 
 /**
  * Email via SMTP. Follows the house convention (8examples, daycare):
@@ -28,7 +29,7 @@ export class EmailClient {
   private port: number;
   private from: string;
   
-  constructor() {
+  constructor(private checkSuppression: (recipients: string[]) => Promise<boolean>) {
     this.user = process.env.GMAIL_USER || process.env.SMTP_USER || '';
     this.pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || '';
     this.host = process.env.SMTP_HOST || 'smtp.gmail.com';
@@ -45,13 +46,37 @@ export class EmailClient {
   }
   
   async send(message: EmailMessage): Promise<EmailResult> {
+    // Enforce this at the last boundary before SMTP, including tasks queued
+    // before the address was blocked. Failed tasks are terminal in the queue.
+    let suppressed = isEmailSuppressed(message.to);
+    if (!suppressed) {
+      try {
+        // Check every send, including queued tasks and reused transports. A
+        // stale cache or unavailable backend must not bypass an automatic block.
+        suppressed = await this.checkSuppression(emailRecipients(message.to));
+      } catch {
+        throw new Error('Email suppression check unavailable');
+      }
+    }
+    if (suppressed) {
+      console.info('[email] Delivery suppressed by the worker do-not-email list');
+      // The result is stored with the notification: keep the private policy
+      // and list out of that error, and do not claim the email was delivered.
+      throw new Error('Email delivery unavailable');
+    }
+
     if (!this.isConfigured()) {
       throw new Error('GMAIL_USER/GMAIL_APP_PASSWORD not configured');
     }
     
+    const returnPath = process.env.EMAIL_BOUNCE_RETURN_PATH ||
+      (this.host.toLowerCase() === 'smtp.gmail.com' ? this.user : undefined);
     const info = await this.getTransporter().sendMail({
       from: this.from,
       to: message.to,
+      // Bounce notices must return to the monitored sending account even
+      // when EMAIL_FROM uses a display alias or another address.
+      ...(returnPath ? { envelope: { from: returnPath, to: message.to } } : {}),
       subject: message.subject,
       text: message.text,
       html: message.html

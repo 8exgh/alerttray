@@ -1,5 +1,7 @@
 import { createHmac } from 'crypto';
 import fetch from 'node-fetch';
+import type { EmailBounce } from './email-bounce-parser';
+import type { EmailRecipientFailure } from './email-failure';
 
 export type Channel = 'apns' | 'call' | 'sms' | 'email' | 'emergency';
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
@@ -24,6 +26,7 @@ export interface DeliveryResult {
   notificationId: string;
   success: boolean;
   errorMessage?: string;
+  emailFailure?: EmailRecipientFailure;
   /** Provider-side id: APNS id, gateway call/sms sid, email message id. */
   providerMessageId?: string;
 }
@@ -106,9 +109,49 @@ export class ApiClient {
         console.log(`📡 POST ${url} → ${response.status} ${response.statusText}: ${responseBody}`);
         throw new Error(`Failed to report result: ${response.statusText}`);
       }
+      const acknowledgement = await response.json() as { success?: boolean };
+      if (acknowledgement.success !== true) throw new Error('Delivery result was not acknowledged');
     } catch (error) {
       console.error('❌ Error reporting delivery result:', error);
       throw error;
     }
+  }
+
+  async reportEmailBounce(bounce: EmailBounce): Promise<boolean> {
+    const body = JSON.stringify(bounce);
+    const response = await fetch(`${this.baseUrl}/api/internal/email-bounces`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': this.apiKey,
+        'X-Signature': this.createSignature(body)
+      },
+      body,
+      signal: AbortSignal.timeout(15_000)
+    });
+    const result = await response.json() as { success?: boolean; matched?: boolean };
+    if (!response.ok || result.success !== true || typeof result.matched !== 'boolean') {
+      throw new Error(`Failed to report email bounce (${response.status})`);
+    }
+    return result.matched;
+  }
+
+  async isEmailSuppressed(recipients: string[]): Promise<boolean> {
+    const body = JSON.stringify({ recipients });
+    const response = await fetch(`${this.baseUrl}/api/internal/email-suppressions/check`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': this.apiKey,
+        'X-Signature': this.createSignature(body)
+      },
+      body,
+      signal: AbortSignal.timeout(15_000)
+    });
+    const result = await response.json() as { success?: boolean; suppressed?: boolean };
+    if (!response.ok || result.success !== true || typeof result.suppressed !== 'boolean') {
+      throw new Error(`Failed to check email suppression (${response.status})`);
+    }
+    return result.suppressed;
   }
 }

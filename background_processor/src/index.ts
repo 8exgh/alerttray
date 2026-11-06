@@ -1,6 +1,8 @@
 import * as dotenv from 'dotenv';
 import { ApiClient, type DeliveryTask } from './api-client';
 import { DeliveryDispatcher, mask } from './delivery-dispatcher';
+import { bounceMonitorConfig, EmailBounceMonitor } from './email-bounce-monitor';
+import { smtpRecipientFailure } from './email-failure';
 
 dotenv.config();
 
@@ -14,12 +16,15 @@ class BackgroundProcessor {
   private checkInterval = 5000; // Check every 5 seconds
   private apiClient: ApiClient;
   private dispatcher: DeliveryDispatcher;
+  private bounceMonitor: EmailBounceMonitor | null;
   /** Tasks currently being delivered (a voice call can take minutes). */
   private inFlight = new Set<string>();
   
   constructor() {
     this.apiClient = new ApiClient();
-    this.dispatcher = new DeliveryDispatcher();
+    this.dispatcher = new DeliveryDispatcher(recipients => this.apiClient.isEmailSuppressed(recipients));
+    const bounceConfig = bounceMonitorConfig();
+    this.bounceMonitor = bounceConfig ? new EmailBounceMonitor(bounceConfig, this.apiClient) : null;
   }
   
   async start(): Promise<void> {
@@ -30,10 +35,12 @@ class BackgroundProcessor {
     console.log(`  - API_KEY present: ${process.env.API_KEY ? 'Yes' : 'No'}`);
     console.log(`  - Phone gateway: ${process.env.PHONE_GATEWAY_URL || 'https://phone-gateway.fusenv.com'} (key: ${process.env.PHONE_GATEWAY_API_KEY ? 'Yes' : 'No'})`);
     console.log(`  - Email (GMAIL_USER): ${process.env.GMAIL_USER ? 'Yes' : 'No'}`);
+    console.log(`  - Email bounce monitoring: ${this.bounceMonitor ? 'enabled (read-only IMAP)' : 'disabled'}`);
     
     let iterationCount = 0;
     
     while (true) {
+      void this.bounceMonitor?.pollIfDue();
       try {
         iterationCount++;
         if (iterationCount % 12 === 1) { // Log every minute (5s * 12 = 60s)
@@ -87,7 +94,8 @@ class BackgroundProcessor {
         taskId: task.id,
         notificationId: task.notificationId,
         success: false,
-        errorMessage: error.message
+        errorMessage: error.message,
+        emailFailure: task.channel === 'email' ? smtpRecipientFailure(error, task.recipient) : undefined
       });
     } finally {
       this.inFlight.delete(task.id);
