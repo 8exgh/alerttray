@@ -118,7 +118,10 @@ export class ProjectionEngine {
         // Contact details live in the system database; nothing to project.
         break;
       case 'NotificationReadEvent':
-        this.projectNotificationRead(db, event);
+        this.projectNotificationRead(db, event, userId);
+        break;
+      case 'AllNotificationsReadEvent':
+        this.projectAllNotificationsRead(db, event, userId);
         break;
       case 'NotificationPurposeCreatedEvent':
         this.projectPurposeCreated(db, event, userId);
@@ -148,10 +151,15 @@ export class ProjectionEngine {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `);
     
-    const now = new Date().toISOString();
+    // Received-at is when the alert was pushed (event time), not when this
+    // projection ran: a batch projected together would otherwise share one
+    // timestamp and lose its order in the inbox.
+    const receivedAt = event.createdAt instanceof Date && !Number.isNaN(event.createdAt.getTime())
+      ? event.createdAt.toISOString()
+      : new Date().toISOString();
     insert.run(
       notificationId, userId, purposeId, title, message,
-      severity, JSON.stringify(metadata || {}), now, now
+      severity, JSON.stringify(metadata || {}), receivedAt, receivedAt
     );
   }
   
@@ -240,17 +248,28 @@ export class ProjectionEngine {
     `).run(counts.completed ? 'delivered' : 'failed', counts.completed, now, now, notificationId);
   }
   
-  private projectNotificationRead(db: Database.Database, event: Event): void {
+  private projectNotificationRead(db: Database.Database, event: Event, userId: string): void {
     const { notificationId } = event.eventData;
     
+    // Scoped to the stream's owner: one user's events never touch another's rows.
     const update = db.prepare(`
       UPDATE notifications 
-      SET status = 'read', read_at = ?, updated_at = ?
-      WHERE id = ?
+      SET status = 'read', read_at = COALESCE(read_at, ?), updated_at = ?
+      WHERE id = ? AND user_id = ?
     `);
     
     const now = new Date().toISOString();
-    update.run(now, now, notificationId);
+    update.run(now, now, notificationId, userId);
+  }
+  
+  private projectAllNotificationsRead(db: Database.Database, event: Event, userId: string): void {
+    const { upTo } = event.eventData;
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE notifications
+      SET status = 'read', read_at = ?, updated_at = ?
+      WHERE user_id = ? AND status != 'read' AND created_at <= ?
+    `).run(now, now, userId, upTo);
   }
   
   private projectPurposeCreated(db: Database.Database, event: Event, userId: string): void {

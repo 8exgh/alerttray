@@ -5,10 +5,15 @@ import { QueryBus } from '@/lib/cqrs/query-bus';
 import { initializeSystem } from '@/lib/startup';
 import { parseEmailRecipientFailure } from '@/lib/delivery/email-failure-policy';
 import { suppressEmailAfterFailure } from '@/lib/delivery/email-suppressions';
+import { endpointOfRecipient, WebPushSubscriptionService } from '@/lib/web-push/subscriptions';
 
 /**
  * Background processor reports the outcome of a delivery task (any channel).
- * Body: { taskId, notificationId, success, errorMessage?, providerMessageId?, emailFailure? }
+ * Body: { taskId, notificationId, success, errorMessage?, providerMessageId?, emailFailure?,
+ *         webPushSubscriptionExpired? }
+ * webPushSubscriptionExpired: the push service answered 404/410 for a webpush
+ * task, i.e. the PWA was removed or its permission revoked; the subscription
+ * is deleted so it is not scheduled again.
  */
 export async function POST(request: NextRequest) {
   await initializeSystem();
@@ -26,7 +31,7 @@ export async function POST(request: NextRequest) {
       }
       
       const body = JSON.parse(bodyText);
-      const { taskId, notificationId, success, errorMessage, providerMessageId, emailFailure } = body;
+      const { taskId, notificationId, success, errorMessage, providerMessageId, emailFailure, webPushSubscriptionExpired } = body;
       
       if (!taskId || !notificationId || typeof success !== 'boolean') {
         return createInternalResponse({
@@ -48,6 +53,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid email recipient failure' }, { status: 400 });
       }
       if (recipientFailure) suppressEmailAfterFailure(recipientFailure, task.id);
+      
+      if (webPushSubscriptionExpired === true && !success && task.channel === 'webpush') {
+        const endpoint = endpointOfRecipient(task.recipient);
+        if (endpoint && WebPushSubscriptionService.removeExpired(endpoint)) {
+          console.log(`🧹 Removed expired Web Push subscription (${new URL(endpoint).host}) for user ${task.userId}`);
+        }
+      }
       
       const commandBus = new CommandBus();
       

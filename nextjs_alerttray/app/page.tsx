@@ -2,12 +2,14 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { isStandalone } from '@/lib/pwa/push-client';
 
 export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    router.push('/login');
+    // The installed app (PWA mode) lives in the inbox; the inbox sends signed-out users to login.
+    router.replace(isStandalone() ? '/inbox' : '/login');
   }, [router]);
 
   return (

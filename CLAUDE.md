@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AlertTray is a notification management service built with CQRS (Command Query Responsibility Segregation) and Event Sourcing patterns. The system consists of three main components:
 
-1. **nextjs_alerttray** - Next.js application with integrated backend, CQRS implementation, and secure API endpoints
-2. **background_processor** - Node.js application that polls for pending delivery tasks and sends them via APNS (push), the phone-call-gateway (voice call, SMS) and SMTP (email)
+1. **nextjs_alerttray** - Next.js application with integrated backend, CQRS implementation, and secure API endpoints. Also an installable PWA ("PWA mode": iPhone home-screen app, Web Push notifications, `/inbox` history)
+2. **background_processor** - Node.js application that polls for pending delivery tasks and sends them via APNS (push), Web Push (PWA), the phone-call-gateway (voice call, SMS) and SMTP (email)
 3. **alerttray_ios** - Native iOS application that receives push notifications
 
 ## Architecture
@@ -18,7 +18,7 @@ AlertTray is a notification management service built with CQRS (Command Query Re
   - User Write Model: `nextjs_alerttray/data/users/{userId}/write.db` (events only)
   - System Database: `nextjs_alerttray/data/system/system.db` (users incl. contact details, sessions, API keys, device tokens)
   - Read Model: `nextjs_alerttray/data/read_model/read.db` (projected state, `delivery_tasks` queue)
-- **Multi-channel delivery**: every notification fans out into one `delivery_tasks` row per (channel, recipient). Channels are `apns`, `call`, `sms`, `email` (and `emergency`, reserved for iPhone emergency alerts — iOS side in progress).
+- **Multi-channel delivery**: every notification fans out into one `delivery_tasks` row per (channel, recipient). Channels are `apns`, `webpush`, `call`, `sms`, `email` (and `emergency`, reserved for iPhone emergency alerts — iOS side in progress). Adding a channel to `CHANNELS` is enough: the read model rebuilds `delivery_tasks` once to widen its CHECK constraint (`widenDeliveryTaskChannels`).
 
 ## Development Commands
 
@@ -65,11 +65,21 @@ npm run build
 
 ### Severity → Channel Routing
 Defined in one place: `nextjs_alerttray/lib/delivery/routing-policy.ts` (`SEVERITY_CHANNEL_POLICY`).
+- `apns` and `webpush` are always on: one task per registered device token / PWA subscription, every severity.
 - `critical`, `high` → APNS push + **phone call + SMS** (via phone-call-gateway). `critical` will additionally use iPhone emergency alerts once the iOS side lands (`emergency` channel, not routed yet).
 - `medium`, `low` → APNS push + **email**.
 - If a routed channel has no recipient configured (e.g. no phone number), it is skipped and `FALLBACK_CHANNEL` (`email`) is used instead. The push API response reports `channels` and `skippedChannels`.
 - Users set their phone number / alert email on `/settings` (`GET|PUT /api/contact`). Phone numbers are stored in E.164.
 - A push request may carry `recipients: { phoneNumber?, email? }` (validated by `parseRecipientOverrides`). When present it replaces the account holder's phone/email for that notification only — blank means "no recipient for that channel", never a fallback to the account holder. Device tokens are unaffected. Used by integrations that alert on behalf of their own users (StatusNest → site owner).
+
+### PWA mode (Web Push)
+- `app/manifest.ts` (standalone, `start_url: /inbox`), `public/sw.js` (push → `showNotification`, tap → `/inbox?n=<id>`, app badge = unread count), icons in `public/icons` (re-render with `node scripts/render-icons.mjs`).
+- `app/inbox/page.tsx`: history, newest first, cursor paging (`GET /api/notifications?before=&limit=&unread=1`), read state (`POST /api/notifications/read` `{notificationId}` or `{all:true, upTo}`; the route waits for the projection, read-your-writes). Polls every 5 s and refreshes on SW messages.
+- Browser side: `lib/pwa/push-client.ts`. iOS only allows push from the home-screen app and only after a tap, so a Safari tab shows "Add to Home Screen" steps. Every open re-sends the subscription (idempotent upsert).
+- Server: `lib/web-push/subscriptions.ts` stores subscriptions in the system DB (`web_push_subscriptions`, unique endpoint, moves to whichever account subscribes; endpoint host allowlist against SSRF). The task recipient is the subscription JSON (+ `appOrigin`). `lib/web-push/vapid.ts` generates and persists the VAPID pair (`web_push_vapid`) unless `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` are set. The worker loads it from `GET /api/internal/web-push/vapid`.
+- Routes: `GET /api/web-push/config`, `POST /api/web-push/subscribe|unsubscribe|test` (test = webpush-only notification, also listed in the inbox).
+- Worker: `background_processor/src/web-push-client.ts` (`web-push` v3, CJS; v4 is ESM-only). The payload uses the Declarative Web Push shape (`web_push: 8030`, see `formatWebPushPayload`) and is capped at 3000 encoded bytes. 404/410 → `webPushSubscriptionExpired` in push-result → the subscription is deleted. 401/403 → the VAPID cache is reloaded.
+- iOS revokes a subscription that receives a push without a notification being shown, so the SW always shows one.
 
 ### Notification Delivery Flow
 1. External system calls `/api/notifications/push` with API key
@@ -93,6 +103,7 @@ Legacy `PushTask*` events are still projected (as `channel: 'apns'`); an existin
 
 ### Polling Intervals
 - Frontend dashboard: 1-second polling
+- PWA inbox: 5-second polling (plus instant refresh on push)
 - Projection engine: 1-second intervals
 - Background processor: 5-second intervals
 
@@ -163,7 +174,8 @@ Production values are injected by the devops repo workflow
 `GMAIL_USER` / `GMAIL_APP_PASSWORD` (shared secrets `GMAIL_8EXAMPLES_*`).
 
 ## Testing Approach
-- `npm test` in both Node projects covers SMTP suppression, MIME bounce parsing, read-only IMAP/retry/checkpoint behavior, historical message ID migration, authenticated bounce reporting, event deduplication and delivery outcome projections.
+- `npm run test:e2e` in nextjs_alerttray: Playwright with full Chromium (`channel: 'chromium'`; the headless shell denies notification permission). It builds, starts `next start` and the real worker against a temp `DATABASE_PATH`, and uses `e2e/fake-push-service.ts`, an HTTPS push service that decrypts RFC 8291 and verifies the VAPID JWT. The iPhone home-screen app is simulated by stubbing `navigator.standalone`/`PushManager`, and a decrypted payload is delivered into the real SW via CDP `ServiceWorker.deliverPushMessage`.
+- `npm test` in both Node projects covers web push routing/subscriptions/VAPID/inbox paging/read state/payload size, SMTP suppression, MIME bounce parsing, read-only IMAP/retry/checkpoint behavior, historical message ID migration, authenticated bounce reporting, event deduplication and delivery outcome projections.
 - Test authentication flow with user registration/login
 - Test API key creation and usage
 - Set a phone number via `PUT /api/contact` and push `high`/`critical` → expect `call` + `sms` tasks; push `medium`/`low` → expect `email`

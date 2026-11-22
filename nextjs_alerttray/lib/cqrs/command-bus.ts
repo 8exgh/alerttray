@@ -35,6 +35,8 @@ export class CommandBus {
         return this.handleUpdateContactDetails(command);
       case 'MarkNotificationRead':
         return this.handleMarkNotificationRead(command);
+      case 'MarkAllNotificationsRead':
+        return this.handleMarkAllNotificationsRead(command);
       case 'CreatePurpose':
         return this.handleCreatePurpose(command);
       case 'TogglePurpose':
@@ -202,6 +204,27 @@ export class CommandBus {
       eventData: {
         notificationId,
         userId: command.userId,
+        timestamp: now
+      },
+      createdAt: now,
+      sequenceNumber: 0
+    }];
+  }
+  
+  /** Marks everything received up to `upTo` as read (later arrivals stay unread). */
+  private handleMarkAllNotificationsRead(command: Command): Event[] {
+    const now = new Date();
+    const upTo = command.payload.upTo ? new Date(command.payload.upTo) : now;
+    assert(!Number.isNaN(upTo.getTime()), 'upTo must be a valid timestamp');
+    
+    return [{
+      aggregateId: command.userId,
+      aggregateType: 'User',
+      eventType: 'AllNotificationsReadEvent',
+      eventVersion: 1,
+      eventData: {
+        userId: command.userId,
+        upTo: upTo.toISOString(),
         timestamp: now
       },
       createdAt: now,

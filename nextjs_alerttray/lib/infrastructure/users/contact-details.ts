@@ -1,6 +1,7 @@
 import { getSystemDatabase } from '../database/connection';
 import type { UserContactDetails } from '@/lib/delivery/routing-policy';
 import type { DeviceTokenRow, UserRow } from '@/types/db-types';
+import { WebPushSubscriptionService } from '@/lib/web-push/subscriptions';
 
 export interface StoredContactDetails {
   email: string;
@@ -39,9 +40,11 @@ export class ContactDetailsService {
   
   /**
    * Everything the routing policy needs to turn a severity into concrete
-   * delivery targets: phone number, email and registered device tokens.
+   * delivery targets: phone number, email, registered device tokens and
+   * PWA Web Push subscriptions.
    */
   static getDeliveryContact(userId: string): UserContactDetails {
+    const webPushSubscriptions = WebPushSubscriptionService.recipientsForUser(userId);
     const db = getSystemDatabase();
     try {
       const user = db.prepare(
@@ -55,7 +58,8 @@ export class ContactDetailsService {
       return {
         phoneNumber: user?.phone_number ?? null,
         notificationEmail: user?.notification_email || user?.email || null,
-        deviceTokens: devices.map(d => d.token)
+        deviceTokens: devices.map(d => d.token),
+        webPushSubscriptions
       };
     } finally {
       db.close();

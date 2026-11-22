@@ -3,6 +3,7 @@ import { ApiClient, type DeliveryTask } from './api-client';
 import { DeliveryDispatcher, mask } from './delivery-dispatcher';
 import { bounceMonitorConfig, EmailBounceMonitor } from './email-bounce-monitor';
 import { smtpRecipientFailure } from './email-failure';
+import { WebPushSubscriptionExpiredError } from './web-push-client';
 
 dotenv.config();
 
@@ -22,7 +23,10 @@ class BackgroundProcessor {
   
   constructor() {
     this.apiClient = new ApiClient();
-    this.dispatcher = new DeliveryDispatcher(recipients => this.apiClient.isEmailSuppressed(recipients));
+    this.dispatcher = new DeliveryDispatcher(
+      recipients => this.apiClient.isEmailSuppressed(recipients),
+      () => this.apiClient.getWebPushVapid()
+    );
     const bounceConfig = bounceMonitorConfig();
     this.bounceMonitor = bounceConfig ? new EmailBounceMonitor(bounceConfig, this.apiClient) : null;
   }
@@ -95,7 +99,8 @@ class BackgroundProcessor {
         notificationId: task.notificationId,
         success: false,
         errorMessage: error.message,
-        emailFailure: task.channel === 'email' ? smtpRecipientFailure(error, task.recipient) : undefined
+        emailFailure: task.channel === 'email' ? smtpRecipientFailure(error, task.recipient) : undefined,
+        webPushSubscriptionExpired: error instanceof WebPushSubscriptionExpiredError ? true : undefined
       });
     } finally {
       this.inFlight.delete(task.id);

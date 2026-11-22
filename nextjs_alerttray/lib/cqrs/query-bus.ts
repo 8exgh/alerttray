@@ -31,6 +31,97 @@ export class QueryBus {
     }));
   }
   
+  /**
+   * One page of the user's notification history, newest first, for the PWA
+   * inbox. `before` is the opaque cursor returned as `nextCursor` by the
+   * previous page; null when there is nothing older.
+   */
+  async getNotificationsPage(
+    userId: string,
+    options: { limit?: number; before?: string | null; unreadOnly?: boolean } = {}
+  ): Promise<{ notifications: Notification[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(Math.floor(options.limit ?? 30), 1), 100);
+    const cursor = options.before ? decodeNotificationCursor(options.before) : null;
+    const db = getReadModelDatabase();
+    try {
+      const rows = db.prepare(`
+        SELECT * FROM notifications
+        WHERE user_id = ?
+          AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
+          AND (? = 0 OR status != 'read')
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(
+        userId,
+        cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.id ?? null,
+        options.unreadOnly ? 1 : 0,
+        limit + 1
+      ) as NotificationRow[];
+      const page = rows.slice(0, limit);
+      const last = page[page.length - 1];
+      return {
+        notifications: page.map(row => this.mapNotification(row)),
+        nextCursor: rows.length > limit && last ? encodeNotificationCursor(last.created_at, last.id) : null
+      };
+    } finally {
+      db.close();
+    }
+  }
+  
+  async getNotificationForUser(userId: string, notificationId: string): Promise<Notification | null> {
+    const db = getReadModelDatabase();
+    try {
+      const row = db.prepare('SELECT * FROM notifications WHERE id = ? AND user_id = ?')
+        .get(notificationId, userId) as NotificationRow | undefined;
+      return row ? this.mapNotification(row) : null;
+    } finally {
+      db.close();
+    }
+  }
+  
+  private mapNotification(row: NotificationRow): Notification {
+    return {
+      id: row.id,
+      userId: row.user_id,
+      purposeId: row.purpose_id,
+      title: row.title,
+      message: row.message,
+      severity: row.severity as Severity,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      status: row.status as Notification['status'],
+      deliveredAt: row.delivered_at ? new Date(row.delivered_at) : undefined,
+      readAt: row.read_at ? new Date(row.read_at) : undefined,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at)
+    };
+  }
+  
+  /**
+   * Read-your-writes for the inbox: wait (bounded) until the projection has
+   * applied a read command, so the response and the next fetch agree with
+   * what the user just did. Returns false on timeout (the change still
+   * lands with the next projection pass).
+   */
+  async waitUntilRead(userId: string, target: { notificationId: string } | { upTo: string }, timeoutMs = 3000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      const db = getReadModelDatabase();
+      let pending: number;
+      try {
+        pending = 'notificationId' in target
+          ? (db.prepare(`SELECT COUNT(*) AS count FROM notifications WHERE id = ? AND user_id = ? AND status != 'read'`)
+              .get(target.notificationId, userId) as CountResult).count
+          : (db.prepare(`SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND status != 'read' AND created_at <= ?`)
+              .get(userId, target.upTo) as CountResult).count;
+      } finally {
+        db.close();
+      }
+      if (pending === 0) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  
   async getPurposes(userId: string): Promise<NotificationPurpose[]> {
     const db = getReadModelDatabase();
     
@@ -203,4 +294,20 @@ export class QueryBus {
     
     return result.count;
   }
+}
+
+
+function encodeNotificationCursor(createdAt: string, id: string): string {
+  return Buffer.from(JSON.stringify([createdAt, id])).toString('base64url');
+}
+
+/** Null for anything that is not a cursor we issued (treated as "first page"). */
+function decodeNotificationCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (Array.isArray(value) && typeof value[0] === 'string' && typeof value[1] === 'string') {
+      return { createdAt: value[0], id: value[1] };
+    }
+  } catch { /* fall through */ }
+  return null;
 }

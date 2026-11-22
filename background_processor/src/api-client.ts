@@ -2,8 +2,9 @@ import { createHmac } from 'crypto';
 import fetch from 'node-fetch';
 import type { EmailBounce } from './email-bounce-parser';
 import type { EmailRecipientFailure } from './email-failure';
+import type { VapidConfig } from './web-push-client';
 
-export type Channel = 'apns' | 'call' | 'sms' | 'email' | 'emergency';
+export type Channel = 'apns' | 'webpush' | 'call' | 'sms' | 'email' | 'emergency';
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 
 /** One delivery of one notification to one recipient over one channel. */
@@ -12,7 +13,7 @@ export interface DeliveryTask {
   notificationId: string;
   userId: string;
   channel: Channel;
-  /** Device token (apns), E.164 phone number (call/sms) or email address (email). */
+  /** Device token (apns), subscription JSON (webpush), E.164 phone number (call/sms) or email address (email). */
   recipient: string;
   title: string;
   message: string;
@@ -29,6 +30,8 @@ export interface DeliveryResult {
   emailFailure?: EmailRecipientFailure;
   /** Provider-side id: APNS id, gateway call/sms sid, email message id. */
   providerMessageId?: string;
+  /** webpush only: the push service says the subscription is gone; the server deletes it. */
+  webPushSubscriptionExpired?: boolean;
 }
 
 function assert(condition: any, message: string): asserts condition {
@@ -153,5 +156,22 @@ export class ApiClient {
       throw new Error(`Failed to check email suppression (${response.status})`);
     }
     return result.suppressed;
+  }
+
+  /** The server's VAPID key pair for signing Web Push (see nextjs_alerttray/lib/web-push/vapid.ts). */
+  async getWebPushVapid(): Promise<VapidConfig> {
+    const response = await fetch(`${this.baseUrl}/api/internal/web-push/vapid`, {
+      headers: { 'X-API-Key': this.apiKey, 'X-Signature': this.createSignature('') },
+      signal: AbortSignal.timeout(15_000)
+    });
+    const result = await response.json() as { success?: boolean; publicKey?: unknown; privateKey?: unknown; subject?: unknown };
+    if (!response.ok || result.success !== true || typeof result.publicKey !== 'string' || typeof result.privateKey !== 'string') {
+      throw new Error(`Failed to load Web Push VAPID keys (${response.status})`);
+    }
+    return {
+      publicKey: result.publicKey,
+      privateKey: result.privateKey,
+      subject: typeof result.subject === 'string' && result.subject ? result.subject : null
+    };
   }
 }

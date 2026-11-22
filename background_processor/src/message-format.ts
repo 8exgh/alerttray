@@ -85,3 +85,56 @@ function escapeHtml(input: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+/**
+ * Web Push payload for the PWA (JSON, encrypted by the sender).
+ *
+ * Uses the Declarative Web Push shape (`web_push: 8030`), which iOS 18.4+ /
+ * Safari 18.4+ display even if the service worker is not running, and which
+ * the AlertTray service worker (public/sw.js) also reads on browsers without
+ * declarative support. Declarative push requires an absolute `navigate`
+ * URL, so without a known app origin a plain payload is sent instead.
+ *
+ * Text is capped so the encrypted message stays under the 4 KB Web Push
+ * limit; the full alert is always in the inbox.
+ */
+export function formatWebPushPayload(alert: AlertContent, appOrigin?: string | null): string {
+  const marker: Partial<Record<Severity, string>> = { critical: '🚨 ', high: '⚠️ ' };
+  const title = clipBytes(`${marker[alert.severity] ?? ''}${alert.title}`, 300);
+  const path = `/inbox?n=${encodeURIComponent(alert.notificationId)}`;
+  const data = { notificationId: alert.notificationId, severity: alert.severity, url: path };
+
+  const render = (body: string) => JSON.stringify(appOrigin
+    ? {
+        web_push: 8030,
+        notification: { title, body, navigate: `${appOrigin}${path}`, tag: alert.notificationId, silent: false, data }
+      }
+    : { title, body, tag: alert.notificationId, ...data });
+
+  // Measure the encoded JSON (multi-byte text and escapes count), shrinking the body until it fits.
+  let budget = 2400;
+  let payload = render(clipBytes(alert.message, budget));
+  while (Buffer.byteLength(payload) > WEB_PUSH_MAX_PAYLOAD_BYTES && budget > 0) {
+    budget = Math.floor(budget * 0.8) - 1;
+    payload = render(clipBytes(alert.message, Math.max(budget, 0)));
+  }
+  return payload;
+}
+
+/** Plaintext budget: 4096-byte record minus encryption header, tag and padding, with headroom. */
+const WEB_PUSH_MAX_PAYLOAD_BYTES = 3000;
+
+/** Cut to at most `maxBytes` of UTF-8 without splitting a character; adds an ellipsis when cut. */
+function clipBytes(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text) <= maxBytes) return text;
+  const ellipsis = '…';
+  let out = '';
+  let used = Buffer.byteLength(ellipsis);
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (used + size > maxBytes) break;
+    out += char;
+    used += size;
+  }
+  return out + ellipsis;
+}

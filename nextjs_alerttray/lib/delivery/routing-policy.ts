@@ -7,6 +7,9 @@
  *
  * Channels:
  *   apns      - iOS push via Apple Push Notification Service (always on)
+ *   webpush   - Web Push to the installed AlertTray PWA (iPhone home-screen
+ *               app, iOS 16.4+, or any browser that subscribed). Always on,
+ *               one task per subscription, like apns.
  *   call      - voice phone call via phone-call-gateway (TTS of the alert)
  *   sms       - SMS via phone-call-gateway
  *   email     - email via SMTP
@@ -17,10 +20,10 @@
 export const SEVERITY_LEVELS = ['low', 'medium', 'high', 'critical'] as const;
 export type Severity = (typeof SEVERITY_LEVELS)[number];
 
-export const CHANNELS = ['apns', 'call', 'sms', 'email', 'emergency'] as const;
+export const CHANNELS = ['apns', 'webpush', 'call', 'sms', 'email', 'emergency'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
-/** Channels routed for each severity, in addition to `apns` (which is always on). */
+/** Channels routed for each severity, in addition to `apns` and `webpush` (which are always on). */
 export const SEVERITY_CHANNEL_POLICY: Record<Severity, readonly Channel[]> = {
   // Top two levels: phone call + SMS.
   // `critical` will additionally go out as an iPhone emergency alert once the
@@ -55,6 +58,11 @@ export interface UserContactDetails {
   notificationEmail: string | null;
   /** Registered APNS device tokens. */
   deviceTokens: string[];
+  /**
+   * Web Push subscriptions of the user's installed PWAs, each serialized as
+   * the delivery-task recipient (see lib/web-push/subscriptions.ts).
+   */
+  webPushSubscriptions?: string[];
 }
 
 export interface DeliveryTarget {
@@ -79,6 +87,9 @@ export function resolveDeliveryTargets(
 
   for (const token of contact.deviceTokens) {
     targets.push({ channel: 'apns', recipient: token });
+  }
+  for (const subscription of contact.webPushSubscriptions ?? []) {
+    targets.push({ channel: 'webpush', recipient: subscription });
   }
 
   const wanted = new Set<Channel>(SEVERITY_CHANNEL_POLICY[severity]);
@@ -112,6 +123,7 @@ function recipientFor(channel: Channel, contact: UserContactDetails): string | n
     case 'email':
       return contact.notificationEmail;
     case 'apns':
+    case 'webpush':
     case 'emergency':
       // Device-bound channels are expanded per token above / handled separately.
       return null;
@@ -141,7 +153,8 @@ export interface RecipientOverrides {
  * REPLACES the account holder's phone number and alert email for that one
  * notification — an absent or blank field means "no recipient for that
  * channel", it does not fall back to the account holder. Registered device
- * tokens are unaffected, so the account holder's iPhones still get the push.
+ * tokens and PWA subscriptions are unaffected, so the account holder's
+ * iPhones still get the push.
  *
  * Returns `{ error }` for malformed input.
  */

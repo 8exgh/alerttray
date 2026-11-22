@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import type { LegacyPushTaskRow } from '@/types/db-types';
 import { isPermanentRecipientFailure } from '@/lib/delivery/email-failure-policy';
+import { CHANNELS } from '@/lib/delivery/routing-policy';
 
 const DATABASE_PATH = process.env.DATABASE_PATH || './data';
 
@@ -114,6 +115,31 @@ export function getSystemDatabase(): Database.Database {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_device_token ON device_tokens(token);
     CREATE INDEX IF NOT EXISTS idx_device_user ON device_tokens(user_id);
+    
+    -- Web Push subscriptions of installed PWAs (iPhone home-screen app etc.)
+    CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      app_origin TEXT,
+      device_name TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_web_push_endpoint ON web_push_subscriptions(endpoint);
+    CREATE INDEX IF NOT EXISTS idx_web_push_user ON web_push_subscriptions(user_id);
+    
+    -- The server's VAPID key pair (one row), generated on first use unless
+    -- VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are set.
+    CREATE TABLE IF NOT EXISTS web_push_vapid (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrations for databases created before contact details existed.
@@ -190,29 +216,11 @@ export function getReadModelDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_notification_user ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_notification_status ON notifications(status);
     CREATE INDEX IF NOT EXISTS idx_notification_created ON notifications(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_notification_user_created ON notifications(user_id, created_at DESC, id DESC);
     
     -- One row per (notification, channel, recipient). Replaces the APNS-only push_tasks table.
-    CREATE TABLE IF NOT EXISTS delivery_tasks (
-      id TEXT PRIMARY KEY,
-      notification_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      channel TEXT NOT NULL CHECK(channel IN ('apns', 'call', 'sms', 'email', 'emergency')),
-      recipient TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high', 'critical')),
-      data JSON,
-      status TEXT CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
-      attempts INTEGER DEFAULT 0,
-      last_attempt_at TIMESTAMP,
-      completed_at TIMESTAMP,
-      error_message TEXT,
-      created_at TIMESTAMP,
-      updated_at TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_delivery_task_status ON delivery_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_delivery_task_notification ON delivery_tasks(notification_id);
-    CREATE INDEX IF NOT EXISTS idx_delivery_task_channel ON delivery_tasks(channel);
+    ${deliveryTasksTableSql('delivery_tasks')};
+    ${DELIVERY_TASK_INDEXES_SQL}
     
     CREATE TABLE IF NOT EXISTS notification_purposes (
       id TEXT PRIMARY KEY,
@@ -243,8 +251,71 @@ export function getReadModelDatabase(): Database.Database {
     db.exec('CREATE INDEX IF NOT EXISTS idx_delivery_provider_message ON delivery_tasks(provider_message_id)');
     if (backfillMessageIds) backfillEmailMessageIds(db);
   })();
+  widenDeliveryTaskChannels(db);
   
   return db;
+}
+
+/** Every column of delivery_tasks, current schema. Shared by creation and the channel migration. */
+function deliveryTasksTableSql(table: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${table} (
+      id TEXT PRIMARY KEY,
+      notification_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN (${CHANNELS.map(c => `'${c}'`).join(', ')})),
+      recipient TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high', 'critical')),
+      data JSON,
+      status TEXT CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+      attempts INTEGER DEFAULT 0,
+      last_attempt_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      error_message TEXT,
+      created_at TIMESTAMP,
+      updated_at TIMESTAMP,
+      provider_message_id TEXT,
+      bounced_at TIMESTAMP
+    )`;
+}
+
+const DELIVERY_TASK_INDEXES_SQL = `
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_status ON delivery_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_notification ON delivery_tasks(notification_id);
+    CREATE INDEX IF NOT EXISTS idx_delivery_task_channel ON delivery_tasks(channel);`;
+
+/**
+ * SQLite cannot alter a CHECK constraint, so databases created before a
+ * channel existed (e.g. 'webpush') get delivery_tasks rebuilt once with the
+ * current channel list. All rows and columns are copied as they are.
+ */
+function widenDeliveryTaskChannels(db: Database.Database): void {
+  const missingChannel = () => {
+    const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'delivery_tasks'`)
+      .get() as { sql: string } | undefined;
+    return !!row && CHANNELS.some(channel => !row.sql.includes(`'${channel}'`));
+  };
+  if (!missingChannel()) return;
+
+  db.transaction(() => {
+    if (!missingChannel()) return; // another connection migrated first
+    const columns = (db.prepare('PRAGMA table_info(delivery_tasks)').all() as { name: string }[])
+      .map(c => c.name);
+    db.exec(deliveryTasksTableSql('delivery_tasks_widened'));
+    const kept = (db.prepare('PRAGMA table_info(delivery_tasks_widened)').all() as { name: string }[])
+      .map(c => c.name)
+      .filter(name => columns.includes(name))
+      .join(', ');
+    db.exec(`
+      INSERT INTO delivery_tasks_widened (${kept}) SELECT ${kept} FROM delivery_tasks;
+      DROP TABLE delivery_tasks;
+      ALTER TABLE delivery_tasks_widened RENAME TO delivery_tasks;
+      ${DELIVERY_TASK_INDEXES_SQL}
+      CREATE INDEX IF NOT EXISTS idx_delivery_provider_message ON delivery_tasks(provider_message_id);
+    `);
+    console.log(`Rebuilt delivery_tasks to allow channels: ${CHANNELS.join(', ')}`);
+  }).immediate();
 }
 
 /** SMTP IDs were already saved in completion events before bounce monitoring. */

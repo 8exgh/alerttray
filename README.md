@@ -4,7 +4,7 @@ AlertTray is a notification management service built with CQRS (Command Query Re
 
 ## System Components
 
-1. **nextjs_alerttray** - Next.js web application with CQRS backend
+1. **nextjs_alerttray** - Next.js web application with CQRS backend, which is also an installable **PWA** (iPhone home-screen app with system notifications and a scrollable inbox)
 2. **background_processor** - Node.js service that delivers queued notifications over APNS, phone call, SMS and email
 3. **alerttray_ios** - Native iOS application for receiving notifications
 
@@ -43,6 +43,35 @@ npm run dev
 1. Open `alerttray_ios/AlertTray.xcodeproj` in Xcode
 2. Configure your development team and bundle identifier
 3. Build and run on simulator or device
+
+### 4. Or: install the PWA on your iPhone (no Xcode)
+
+AlertTray also runs as a home-screen web app ("PWA mode") with real iPhone notifications, using Web Push (iOS/iPadOS 16.4+):
+
+1. Open the AlertTray site in **Safari** on the iPhone and sign in (the inbox shows these steps too)
+2. Tap **Share → Add to Home Screen**
+3. Open **AlertTray from the home screen** and sign in. It opens on the **Inbox**
+4. Tap **Enable notifications** and allow. Use **Send test** to check a notification pops up
+
+Every alert, of any severity, is then pushed to the phone and kept in the inbox, newest first with infinite
+scroll. Tapping a notification opens that alert, and the home-screen badge shows the unread count. The inbox has
+an Unread filter and *Mark all read*. It works the same in desktop Chrome, Edge and Firefox.
+
+No setup is needed on the server. The VAPID key pair is generated on first use and stored in the system
+database, and the background processor fetches it over the signed internal API, so the keys used to subscribe and
+to sign pushes always match. Optional settings:
+
+```env
+# nextjs_alerttray — pin a key pair instead (from `npx web-push generate-vapid-keys`).
+# Changing it makes every installed app subscribe again, which happens automatically on its next open.
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:ops@example.com   # contact sent to push services; worker falls back to mailto:$GMAIL_USER
+```
+
+Subscriptions only accept endpoints at known push services (Apple, Google, Mozilla, Microsoft).
+`WEB_PUSH_EXTRA_ENDPOINT_ORIGINS` adds origins for tests only. When a push service reports a subscription gone
+(404/410), it is deleted. Signing out of the app, or tapping *Turn off*, stops notifications to that device.
 
 ## Initial Setup
 
@@ -120,10 +149,13 @@ curl -X POST http://localhost:3000/api/notifications/push \
 
 | Severity | Channels |
 |----------|----------|
-| critical | iPhone push, phone call, SMS *(iPhone emergency alert: in progress)* |
-| high     | iPhone push, phone call, SMS |
-| medium   | iPhone push, email |
-| low      | iPhone push, email |
+| critical | iPhone push, PWA push, phone call, SMS *(iPhone emergency alert: in progress)* |
+| high     | iPhone push, PWA push, phone call, SMS |
+| medium   | iPhone push, PWA push, email |
+| low      | iPhone push, PWA push, email |
+
+"iPhone push" is the native app (APNS). "PWA push" is Web Push to every device that enabled notifications in
+the installed web app (`webpush` channel, one task per device).
 
 The mapping lives in `nextjs_alerttray/lib/delivery/routing-policy.ts`. Calls and SMS go through the
 [phone-call-gateway](https://phone-gateway.fusenv.com) (Twilio behind it); a call is an LLM voice agent that
@@ -244,6 +276,8 @@ curl -X PUT http://localhost:3000/api/contact -b cookies.txt \
 ```bash
 # In nextjs_alerttray directory
 npm test
+npm run test:e2e   # builds, then Playwright: real Next.js server + background processor + local HTTPS
+                   # push service; checks encryption, VAPID, service-worker notifications, inbox paging
 
 # In background_processor directory
 npm test

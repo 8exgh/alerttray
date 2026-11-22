@@ -2,6 +2,7 @@ import type { DeliveryTask } from './api-client';
 import { PushSender } from './push-sender';
 import { PhoneGatewayClient } from './phone-gateway-client';
 import { EmailClient } from './email-client';
+import { WebPushClient, type VapidConfig } from './web-push-client';
 import {
   formatSms,
   formatCallOpeningLine,
@@ -9,6 +10,7 @@ import {
   formatEmailSubject,
   formatEmailText,
   formatEmailHtml,
+  formatWebPushPayload,
   type AlertContent
 } from './message-format';
 
@@ -29,10 +31,16 @@ export class DeliveryDispatcher {
   private pushSender: PushSender;
   private phoneGateway: PhoneGatewayClient;
   private email: EmailClient;
+  private webPush: WebPushClient;
   private dryRun: boolean;
   
-  constructor(checkEmailSuppression: (recipients: string[]) => Promise<boolean>) {
+  constructor(
+    checkEmailSuppression: (recipients: string[]) => Promise<boolean>,
+    loadVapid: () => Promise<VapidConfig> = async () => { throw new Error('Web Push VAPID keys unavailable'); },
+    webPush?: WebPushClient
+  ) {
     this.pushSender = new PushSender();
+    this.webPush = webPush ?? new WebPushClient(loadVapid);
     this.phoneGateway = new PhoneGatewayClient();
     this.email = new EmailClient(checkEmailSuppression);
     this.dryRun = process.env.DELIVERY_DRY_RUN === '1';
@@ -51,6 +59,8 @@ export class DeliveryDispatcher {
     switch (task.channel) {
       case 'apns':
         return this.sendPush(task);
+      case 'webpush':
+        return this.sendWebPush(task, alert);
       case 'sms':
         return this.sendSms(task, alert);
       case 'call':
@@ -77,6 +87,17 @@ export class DeliveryDispatcher {
       data: task.data || {}
     });
     return {};
+  }
+  
+  private async sendWebPush(task: DeliveryTask, alert: AlertContent): Promise<DispatchOutcome> {
+    let appOrigin: string | undefined;
+    try { appOrigin = JSON.parse(task.recipient).appOrigin; } catch { /* validated by the client below */ }
+    const payload = formatWebPushPayload(alert, appOrigin);
+    if (this.dryRun) {
+      console.log(`🧪 [webpush] would push to ${mask(task.recipient)}: ${task.title}`);
+      return { providerMessageId: 'dry-run' };
+    }
+    return this.webPush.sendNotification(task.recipient, payload, task.severity);
   }
   
   private async sendSms(task: DeliveryTask, alert: AlertContent): Promise<DispatchOutcome> {
@@ -132,6 +153,13 @@ export class DeliveryDispatcher {
 
 /** Mask a recipient (token, phone or email) for logs. */
 export function mask(recipient: string): string {
+  if (recipient.startsWith('{')) {
+    try {
+      return `webpush:${new URL(JSON.parse(recipient).endpoint).host}`;
+    } catch {
+      return 'webpush:?';
+    }
+  }
   if (recipient.includes('@')) {
     const [local, domain] = recipient.split('@');
     return `${local.slice(0, 2)}…@${domain}`;
